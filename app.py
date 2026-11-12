@@ -99,3 +99,41 @@ if st.button("🤖 Botu Çalıştır"):
         except Exception as hata:
             st.error("Bot çalıştırılamadı.")
             st.code(str(hata))
+st.divider()
+st.header("🚀 5 Botu Tek Tuşla Çalıştır")
+
+toplu_konu = st.text_area(
+    "YouTube video konusunu yaz",
+    key="toplu_konu"
+)
+
+if st.button("🚀 Tüm Ekibi Çalıştır"):
+    if not toplu_konu.strip():
+        st.warning("Önce bir konu yaz.")
+    else:
+        client = genai.Client(
+            api_key=st.secrets["GEMINI_API_KEY"]
+        )
+
+        for bot_adi, bot_gorevi in botlar.items():
+            with st.spinner(f"{bot_adi} çalışıyor..."):
+                try:
+                    yanit = client.models.generate_content(
+                        model="gemini-3.1-flash-lite",
+                        contents=(
+                            "Türkçe yanıt ver. "
+                            + bot_gorevi
+                            + "\nKonu: "
+                            + toplu_konu
+                        )
+                    )
+
+                    st.subheader(bot_adi)
+                    if yanit.text:
+                        st.markdown(yanit.text)
+                    else:
+                        st.warning("Boş yanıt geldi.")
+
+                except Exception as hata:
+                    st.error(f"{bot_adi} çalıştırılamadı.")
+                    st.warning("Bu botu daha sonra tekrar deneyebilirsin.")
