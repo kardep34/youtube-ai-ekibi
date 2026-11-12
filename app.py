@@ -1,4 +1,4 @@
-
+import time
 
 import streamlit as st
 import hmac
@@ -56,23 +56,33 @@ if st.button("🤖 Botu Çalıştır"):
                     api_key=st.secrets["GEMINI_API_KEY"]
                 )
 
-                istem = (
-                    "Türkçe yanıt ver. "
-                    + botlar[secim]
-                    + "\nKonu: "
-                    + konu
-                )
+                
+        istem = (
+            "Türkçe yanıt ver. "
+            + botlar[secim]
+            + "\nKonu: "
+            + konu
+        )
 
+        for deneme in range(3):
+            try:
                 yanit = client.models.generate_content(
                     model="gemini-3.5-flash-lite",
                     contents=istem
                 )
+                break
+            except Exception as hata:
+                if "503" in str(hata) and deneme < 2:
+                    time.sleep(10)
+                else:
+                    raise
 
-            if yanit.text:
-                st.subheader("✨ Botun Cevabı")
-                st.markdown(yanit.text)
-            else:
-                st.warning("Bot boş yanıt verdi.")
+        if yanit.text:
+            st.subheader("✨ Botun Cevabı")
+            st.markdown(yanit.text)
+        else:
+            st.warning("Bot boş yanıt verdi.")
+
 
         except Exception as hata:
             st.error("Bot çalıştırılamadı.")
