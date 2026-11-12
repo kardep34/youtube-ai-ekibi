@@ -1,46 +1,81 @@
 
+
 import streamlit as st
 import hmac
+from google import genai
 
-st.title("🔐 YouTube Yapay Zeka Ekibim")
+st.set_page_config(page_title="YouTube Yapay Zeka Ekibim", page_icon="🎬")
 
-sifre = st.text_input("Şifrenizi girin", type="password")
+st.title("🎬 YouTube Yapay Zeka Ekibim")
 
-if st.button("Giriş Yap"):
-    if "PANEL_PASSWORD" not in st.secrets:
-        st.error("Panel şifresi henüz ayarlanmadı.")
-    elif hmac.compare_digest(
-        sifre, st.secrets["PANEL_PASSWORD"]
-    ):
-        st.session_state["giris"] = True
-    else:
-        st.error("Yanlış şifre!")
+# Şifreli giriş
+if "giris" not in st.session_state:
+    st.session_state["giris"] = False
 
-if st.session_state.get("giris", False):
-    st.success("Bot yönetim paneli hazır!")
-else:
-    st.stop()  
+if not st.session_state["giris"]:
+    sifre = st.text_input("Panel şifresi", type="password")
+
+    if st.button("Giriş Yap"):
+        if hmac.compare_digest(
+            sifre, st.secrets["PANEL_PASSWORD"]
+        ):
+            st.session_state["giris"] = True
+            st.rerun()
+        else:
+            st.error("Şifre yanlış!")
+
+    st.stop()
+
+st.success("✅ Panele hoş geldin!")
+
+if st.button("Çıkış Yap"):
+    st.session_state["giris"] = False
+    st.rerun()
+
 st.divider()
-st.header("🎬 YouTube Yapay Zeka Ekibi")
+st.header("🤖 Yapay Zeka Ekibim")
 
 botlar = {
-    "💡 Fikir Üretici": "Yeni video fikirleri hazırlar.",
-    "✍️ Senaryo Yazarı": "Video senaryoları hazırlar.",
-    "🎯 Başlık Uzmanı": "Video başlıkları önerir.",
-    "📝 Açıklama Uzmanı": "Açıklama ve etiket hazırlar.",
-    "🎨 Kanal Tasarımcısı": "Kanal ismi, logo, profil resmi, kapak ve küçük resim tasarımlarını planlar."
+    "💡 Fikir Üretici": "YouTube için 10 özgün video fikri üret.",
+    "✍️ Senaryo Yazarı": "YouTube videosu için giriş, gelişme ve kapanış içeren ayrıntılı bir senaryo yaz.",
+    "🎯 Başlık Uzmanı": "YouTube için 10 dikkat çekici, doğal ve arama dostu başlık üret.",
+    "📝 Açıklama Uzmanı": "YouTube video açıklaması, etiketler ve hashtagler hazırla.",
+    "🎨 Kanal Tasarımcısı": "5 kanal ismi öner. Profil resmi ve kanal kapağı için ayrıntılı görsel tasarım tarifleri hazırla."
 }
 
-secim = st.selectbox("Bot seç", list(botlar))
-st.info(botlar[secim])
+secim = st.selectbox("Bot seç", list(botlar.keys()))
+konu = st.text_area("Kanal veya video konusunu yaz")
 
-konu = st.text_input("Kanal veya video konusunu yaz")
-
-if st.button("Botu Çalıştır"):
-    if konu.strip():
-        st.success(f"{secim} için görev hazır!")
-        st.write("Konu:", konu)
-    else:
+if st.button("🤖 Botu Çalıştır"):
+    if not konu.strip():
         st.warning("Önce bir konu yaz.")
+    else:
+        try:
+            with st.spinner("Yapay zeka çalışıyor..."):
+                client = genai.Client(
+                    api_key=st.secrets["GEMINI_API_KEY"]
+                )
+
+                istem = (
+                    "Türkçe yanıt ver. "
+                    + botlar[secim]
+                    + "\nKonu: "
+                    + konu
+                )
+
+                yanit = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=istem
+                )
+
+            if yanit.text:
+                st.subheader("✨ Botun Cevabı")
+                st.markdown(yanit.text)
+            else:
+                st.warning("Bot boş yanıt verdi.")
+
+        except Exception as hata:
+            st.error("Bot çalıştırılamadı.")
+            st.code(str(hata))
 
 
