@@ -80,7 +80,7 @@ if st.button("🤖 Botu Çalıştır"):
                 for deneme in range(3):
                     try:
                         yanit = client.models.generate_content(
-                            model="gemini-3.5-flash-lite",
+                            model="gemini-3.1-flash-lite",
                             contents=istem
                         )
                         break
