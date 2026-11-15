@@ -1,6 +1,8 @@
+import base64
+import hashlib
 import hmac
-import time
 import secrets
+import time
 from urllib.parse import urlparse
 
 import streamlit as st
@@ -13,6 +15,66 @@ st.set_page_config(page_title='VORTEX 360 | Yapay Zeka Ekibi', page_icon='🌀')
 st.title('🌀 VORTEX 360')
 st.caption('Bilinmeyenin Peşinde | İçerik ve YouTube yönetim paneli')
 
+SCOPES = ['https://www.googleapis.com/auth/youtube']
+REQUIRED = ['YOUTUBE_CLIENT_ID', 'YOUTUBE_CLIENT_SECRET', 'YOUTUBE_REDIRECT_URI']
+
+
+def new_flow():
+    redirect_uri = st.secrets['YOUTUBE_REDIRECT_URI'].strip()
+    if urlparse(redirect_uri).scheme != 'https':
+        raise ValueError('YOUTUBE_REDIRECT_URI HTTPS olmalı.')
+    config = {'web': {
+        'client_id': st.secrets['YOUTUBE_CLIENT_ID'],
+        'client_secret': st.secrets['YOUTUBE_CLIENT_SECRET'],
+        'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+        'token_uri': 'https://oauth2.googleapis.com/token',
+        'redirect_uris': [redirect_uri],
+    }}
+    return Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redirect_uri)
+
+
+def oauth_signature(encoded):
+    # HMAC state remains verifiable after Google's redirect starts a new Streamlit session.
+    key = (st.secrets['YOUTUBE_CLIENT_SECRET'] + ':' + st.secrets['PANEL_PASSWORD']).encode()
+    return hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
+
+
+def new_oauth_state():
+    payload = f'{int(time.time())}.{secrets.token_urlsafe(24)}'
+    encoded = base64.urlsafe_b64encode(payload.encode()).decode().rstrip('=')
+    return encoded + '.' + oauth_signature(encoded)
+
+
+def valid_oauth_state(state):
+    try:
+        encoded, signature = state.rsplit('.', 1)
+        if not hmac.compare_digest(oauth_signature(encoded), signature):
+            return False
+        payload = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)).decode()
+        issued = int(payload.split('.', 1)[0])
+        return 0 <= time.time() - issued <= 600
+    except (ValueError, UnicodeError):
+        return False
+
+
+# Handle the Google redirect BEFORE the password gate, which otherwise discards it.
+code = st.query_params.get('code')
+state = st.query_params.get('state')
+if code and not st.session_state.get('yt_credentials'):
+    if any(not st.secrets.get(key) for key in REQUIRED) or not state or not valid_oauth_state(state):
+        st.query_params.clear()
+        st.error('Google bağlantısı doğrulanamadı. Yeniden bağlanmayı deneyin.')
+    else:
+        try:
+            flow = new_flow()
+            flow.fetch_token(code=code)
+            st.session_state['yt_credentials'] = flow.credentials
+            st.session_state['yt_oauth_success'] = True
+            st.query_params.clear()
+        except Exception as exc:
+            st.query_params.clear()
+            st.error(f'Google yetkilendirmesi tamamlanamadı: {exc}')
+
 if not st.session_state.get('giris', False):
     password = st.text_input('Panel şifresi', type='password')
     if st.button('Giriş Yap'):
@@ -23,7 +85,7 @@ if not st.session_state.get('giris', False):
     st.stop()
 
 if st.button('Çıkış Yap'):
-    for key in ['giris', 'yt_credentials', 'yt_oauth_state', 'yt_oauth_verifier']:
+    for key in ['giris', 'yt_credentials', 'yt_auth_url', 'yt_oauth_success']:
         st.session_state.pop(key, None)
     st.rerun()
 
@@ -32,8 +94,9 @@ botlar = {
     '✍️ Senaryo Yazarı': '6-8 dakikalık uzun video senaryosu ve 3 farklı 30-45 saniyelik Shorts senaryosu yaz.',
     '🎯 Başlık Uzmanı': '10 dikkat çekici ama yanıltıcı olmayan başlık öner.',
     '📝 Açıklama Uzmanı': 'YouTube açıklaması, bölüm zamanları için taslak, etiketler ve hashtagler üret.',
-    '🎨 Kanal Tasarımcısı': 'VORTEX 360 için siyah, mor, elektrik mavisi görsel tasarım ve küçük resim önerileri üret.'
+    '🎨 Kanal Tasarımcısı': 'VORTEX 360 için siyah, mor, elektrik mavisi görsel tasarım ve küçük resim önerileri üret.',
 }
+
 
 def bot_calistir(client, gorev, konu):
     prompt = f'Türkçe yanıt ver. Kanal VORTEX 360, slogan Bilinmeyenin Peşinde.\nGörev: {gorev}\nKonu: {konu}'
@@ -46,6 +109,7 @@ def bot_calistir(client, gorev, konu):
                 time.sleep(10 * (attempt + 1))
             else:
                 raise
+
 
 st.header('🤖 Beş Bot Tek Panelde')
 konu = st.text_area('Video konusu', value='Mariana Çukuru: Okyanusun en derin noktasında neler var?')
@@ -79,55 +143,24 @@ if st.session_state.get('icerik_paketi'):
 st.divider()
 st.header('🔗 YouTube Resmi Bağlantısı')
 st.caption('Google OAuth kullanılır. Google şifreniz bu uygulamaya verilmez. Kanal değişiklikleri yalnızca onayınızla yapılır.')
-
-SCOPES = ['https://www.googleapis.com/auth/youtube']
-REQUIRED = ['YOUTUBE_CLIENT_ID', 'YOUTUBE_CLIENT_SECRET', 'YOUTUBE_REDIRECT_URI']
 missing = [key for key in REQUIRED if not st.secrets.get(key)]
-
-def new_flow():
-    redirect_uri = st.secrets['YOUTUBE_REDIRECT_URI'].strip()
-    if urlparse(redirect_uri).scheme != 'https':
-        raise ValueError('YOUTUBE_REDIRECT_URI HTTPS olmalı.')
-    config = {'web': {'client_id': st.secrets['YOUTUBE_CLIENT_ID'],
-                      'client_secret': st.secrets['YOUTUBE_CLIENT_SECRET'],
-                      'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
-                      'token_uri': 'https://oauth2.googleapis.com/token',
-                      'redirect_uris': [redirect_uri]}}
-    return Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redirect_uri)
-
 if missing:
-    st.info('YouTube bağlantısı için Google Cloud OAuth bilgileri Streamlit Secrets bölümüne eklenmeli: ' + ', '.join(missing))
+    st.info('YouTube bağlantısı için eksik Streamlit Secrets: ' + ', '.join(missing))
 else:
+    if st.session_state.pop('yt_oauth_success', False):
+        st.success('Google yetkilendirmesi tamamlandı.')
     if st.button('🔐 Google ile YouTube Bağla'):
         try:
             flow = new_flow()
-            state = secrets.token_urlsafe(32)
-            url, _ = flow.authorization_url(access_type='offline', include_granted_scopes='true', prompt='consent', state=state)
-            st.session_state['yt_oauth_state'] = state
-            st.session_state['yt_oauth_verifier'] = flow.code_verifier
-            st.link_button('Google izin ekranını aç', url)
+            url, _ = flow.authorization_url(
+                access_type='offline', include_granted_scopes='true',
+                prompt='consent', state=new_oauth_state(),
+            )
             st.session_state['yt_auth_url'] = url
         except Exception as exc:
             st.error(f'Bağlantı başlatılamadı: {exc}')
     if st.session_state.get('yt_auth_url'):
         st.link_button('Google izin ekranını aç', st.session_state['yt_auth_url'])
-
-    code = st.query_params.get('code')
-    state = st.query_params.get('state')
-    if code and not st.session_state.get('yt_credentials'):
-        if not state or not hmac.compare_digest(state, st.session_state.get('yt_oauth_state', '')):
-            st.error('Güvenlik doğrulaması başarısız. Bağlantıyı yeniden başlatın.')
-        else:
-            try:
-                flow = new_flow()
-                flow.code_verifier = st.session_state.get('yt_oauth_verifier')
-                flow.fetch_token(code=code)
-                st.session_state['yt_credentials'] = flow.credentials
-                st.query_params.clear()
-                st.success('Google yetkilendirmesi tamamlandı.')
-                st.rerun()
-            except Exception as exc:
-                st.error(f'Google yetkilendirmesi tamamlanamadı: {exc}')
 
     creds = st.session_state.get('yt_credentials')
     if creds:
