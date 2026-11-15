@@ -199,3 +199,50 @@ else:
             st.rerun()
 
 st.caption('Not: Bu panel henüz video dosyası üretmez, YouTube kanal adını veya kapağını otomatik değiştirmez. OAuth oturumu geçicidir.')
+st.divider()
+st.header("📤 Botların Hazırladığı Videoyu YouTube'a Yükle")
+
+video = st.file_uploader("MP4 video seç", type=["mp4"])
+baslik = st.text_input("Video başlığı", max_chars=100)
+aciklama = st.text_area("Video açıklaması")
+onay = st.checkbox("Videonun gizli olarak yüklenmesini onaylıyorum")
+
+if st.button("🚀 YouTube'a Yükle", disabled=not onay):
+    if not video or not baslik.strip():
+        st.warning("Video ve başlık gerekli.")
+    elif not st.session_state.get("yt_credentials"):
+        st.error("Önce YouTube hesabını bağla.")
+    else:
+        import tempfile
+        from googleapiclient.http import MediaFileUpload
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+            f.write(video.getvalue())
+            dosya_yolu = f.name
+
+        try:
+            yt = build(
+                "youtube", "v3",
+                credentials=st.session_state["yt_credentials"],
+                cache_discovery=False,
+            )
+            sonuc = yt.videos().insert(
+                part="snippet,status",
+                body={
+                    "snippet": {
+                        "title": baslik,
+                        "description": aciklama,
+                        "categoryId": "27",
+                    },
+                    "status": {"privacyStatus": "private"},
+                },
+                media_body=MediaFileUpload(
+                    dosya_yolu, mimetype="video/mp4", resumable=True
+                ),
+            ).execute()
+            st.success("Video gizli yüklendi: " + sonuc["id"])
+        except Exception as hata:
+            st.error(f"Yükleme başarısız: {hata}")
+        finally:
+            import os
+            os.unlink(dosya_yolu)
