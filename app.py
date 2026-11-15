@@ -30,7 +30,12 @@ def new_flow():
         'token_uri': 'https://oauth2.googleapis.com/token',
         'redirect_uris': [redirect_uri],
     }}
-    return Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redirect_uri)
+    return Flow.from_client_config(
+    config,
+    scopes=SCOPES,
+    redirect_uri=redirect_uri,
+    autogenerate_code_verifier=False,
+    )
 
 
 def oauth_signature(encoded):
