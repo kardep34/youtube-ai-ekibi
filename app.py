@@ -246,3 +246,17 @@ if st.button("🚀 YouTube'a Yükle", disabled=not onay):
         finally:
             import os
             os.unlink(dosya_yolu)
+            st.divider()
+st.subheader("🤖 Bot İçeriğini Video Alanına Aktar")
+
+if st.button("📋 Bot Sonuçlarını Aktar"):
+    paket = st.session_state.get("icerik_paketi", "")
+    if not paket:
+        st.warning("Önce Tüm Ekibi Çalıştır.")
+    else:
+        st.session_state["video_baslik"] = (
+            st.session_state.get("video_baslik")
+            or "Mariana Çukuru: Derinliklerde Neler Var?"
+        )
+        st.session_state["video_aciklama"] = paket[:4900]
+        st.success("İçerik hazırlandı. Sayfayı yenileyince alanlarda görünecek.")
