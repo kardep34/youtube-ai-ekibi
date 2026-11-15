@@ -70,7 +70,7 @@ def bot_calistir(client, gorev, konu):
     for deneme in range(3):
         try:
             yanit = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="gemini-3.5-flash-lite",
                 contents=mesaj
             )
             return yanit.text or "Boş yanıt geldi."
