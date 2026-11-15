@@ -203,8 +203,8 @@ st.divider()
 st.header("📤 Botların Hazırladığı Videoyu YouTube'a Yükle")
 
 video = st.file_uploader("MP4 video seç", type=["mp4"])
-baslik = st.text_input("Video başlığı", max_chars=100)
-aciklama = st.text_area("Video açıklaması")
+baslik = st.text_input("Video başlığı", max_chars=100, key="video_baslik")
+aciklama = st.text_area("Video açıklaması", key="video_aciklama")
 onay = st.checkbox("Videonun gizli olarak yüklenmesini onaylıyorum")
 
 if st.button("🚀 YouTube'a Yükle", disabled=not onay):
