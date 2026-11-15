@@ -1,7 +1,6 @@
 
 import hmac
 import time
-
 import streamlit as st
 from google import genai
 
@@ -17,10 +16,7 @@ if "giris" not in st.session_state:
     st.session_state["giris"] = False
 
 if not st.session_state["giris"]:
-    sifre = st.text_input(
-        "Panel şifresi",
-        type="password"
-    )
+    sifre = st.text_input("Panel şifresi", type="password")
 
     if st.button("Giriş Yap"):
         if hmac.compare_digest(
@@ -30,76 +26,104 @@ if not st.session_state["giris"]:
             st.session_state["giris"] = True
             st.rerun()
         else:
-            st.error("Şifre yanlış!")
+            st.error("Şifre yanlış.")
 
     st.stop()
-
-st.success("✅ Panele hoş geldin!")
 
 if st.button("Çıkış Yap"):
     st.session_state["giris"] = False
     st.rerun()
 
 st.divider()
-st.header("🤖 Yapay Zeka Ekibim")
 
 botlar = {
-    "💡 Fikir Üretici": "10 özgün YouTube video fikri üret.",
-    "✍️ Senaryo Yazarı": "Giriş, gelişme ve kapanış içeren ayrıntılı YouTube video senaryosu yaz.",
-    "🎯 Başlık Uzmanı": "10 dikkat çekici ve arama dostu YouTube başlığı üret.",
-    "📝 Açıklama Uzmanı": "YouTube video açıklaması, etiketler ve hashtagler hazırla.",
-    "🎨 Kanal Tasarımcısı": "5 kanal ismi öner. Profil resmi ve kanal kapağı için ayrıntılı tasarım tarifleri hazırla."
+    "💡 Fikir Üretici": (
+        "Bu konuda 10 özgün YouTube video fikri üret. "
+        "Her fikri kısaca açıkla."
+    ),
+    "✍️ Senaryo Yazarı": (
+        "Bu konuda giriş, gelişme ve kapanış içeren "
+        "ayrıntılı bir YouTube video senaryosu yaz."
+    ),
+    "🎯 Başlık Uzmanı": (
+        "Bu konuda 10 dikkat çekici, dürüst "
+        "YouTube video başlığı öner."
+    ),
+    "📝 Açıklama Uzmanı": (
+        "Bu konuda YouTube açıklaması, "
+        "etiketler ve hashtagler hazırla."
+    ),
+    "🎨 Kanal Tasarımcısı": (
+        "Bu konuda kanal isimleri, logo fikirleri, "
+        "profil resmi ve banner tasarım önerileri hazırla."
+    )
 }
 
-secim = st.selectbox(
-    "Bot seç",
-    list(botlar.keys())
-)
+def bot_calistir(client, gorev, konu):
+    mesaj = (
+        "Türkçe yanıt ver.\n"
+        + gorev
+        + "\nKonu: "
+        + konu
+    )
+
+    for deneme in range(3):
+        try:
+            yanit = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=mesaj
+            )
+            return yanit.text or "Boş yanıt geldi."
+
+        except Exception as hata:
+            hata_metni = str(hata)
+
+            if (
+                ("429" in hata_metni or
+                 "503" in hata_metni)
+                and deneme < 2
+            ):
+                time.sleep(10 * (deneme + 1))
+            else:
+                raise
+
+def sonuc_goster(ad, gorev, konu, client):
+    with st.spinner(f"{ad} çalışıyor..."):
+        try:
+            sonuc = bot_calistir(client, gorev, konu)
+            st.subheader(ad)
+            st.markdown(sonuc)
+        except Exception as hata:
+            st.error(f"{ad} çalıştırılamadı.")
+            st.warning(
+                "Gemini yoğun olabilir veya "
+                "kullanım sınırına ulaşılmış olabilir."
+            )
+            with st.expander("Hata ayrıntısı"):
+                st.code(str(hata))
+
+st.header("🤖 Yapay Zeka Ekibim")
+
+secim = st.selectbox("Bot seç", list(botlar.keys()))
 
 konu = st.text_area(
-    "Kanal veya video konusunu yaz"
+    "Kanal veya video konusunu yaz",
+    key="tek_konu"
 )
 
 if st.button("🤖 Botu Çalıştır"):
     if not konu.strip():
         st.warning("Önce bir konu yaz.")
     else:
-        try:
-            with st.spinner("Yapay zeka çalışıyor..."):
-                client = genai.Client(
-                    api_key=st.secrets["GEMINI_API_KEY"]
-                )
+        client = genai.Client(
+            api_key=st.secrets["GEMINI_API_KEY"]
+        )
+        sonuc_goster(
+            secim, botlar[secim], konu, client
+        )
 
-                istem = (
-                    "Türkçe yanıt ver.\n"
-                    + botlar[secim]
-                    + "\nKonu: "
-                    + konu
-                )
-
-                for deneme in range(3):
-                    try:
-                        yanit = client.models.generate_content(
-                            model="gemini-3.1-flash-lite",
-                            contents=istem
-                        )
-                        break
-                    except Exception as hata:
-                        if "503" in str(hata) and deneme < 2:
-                            time.sleep(10)
-                        else:
-                            raise
-
-            if yanit.text:
-                st.subheader("✨ Botun Cevabı")
-                st.markdown(yanit.text)
-            else:
-                st.warning("Bot boş yanıt verdi.")
-
-        except Exception as hata:
-            st.error("Bot çalıştırılamadı.")
-            st.code(str(hata))
 st.divider()
+
 st.header("🚀 5 Botu Tek Tuşla Çalıştır")
 
 toplu_konu = st.text_area(
@@ -116,24 +140,13 @@ if st.button("🚀 Tüm Ekibi Çalıştır"):
         )
 
         for bot_adi, bot_gorevi in botlar.items():
-            with st.spinner(f"{bot_adi} çalışıyor..."):
-                try:
-                    yanit = client.models.generate_content(
-                        model="gemini-3.1-flash-lite",
-                        contents=(
-                            "Türkçe yanıt ver. "
-                            + bot_gorevi
-                            + "\nKonu: "
-                            + toplu_konu
-                        )
-                    )
+            sonuc_goster(
+                bot_adi,
+                bot_gorevi,
+                toplu_konu,
+                client
+            )
+            time.sleep(5)
 
-                    st.subheader(bot_adi)
-                    if yanit.text:
-                        st.markdown(yanit.text)
-                    else:
-                        st.warning("Boş yanıt geldi.")
+        st.success("Ekip çalışması tamamlandı.")
 
-                except Exception as hata:
-                    st.error(f"{bot_adi} çalıştırılamadı.")
-                    st.warning("Bu botu daha sonra tekrar deneyebilirsin.")
