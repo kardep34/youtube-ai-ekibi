@@ -1,3 +1,4 @@
+from base64 import b64encode
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -24,23 +25,28 @@ def app():
 def test_narration_wav_and_duration():
     pcm = b'\x00\x00' * 24000
     client = Mock()
-    client.models.generate_content.return_value = SimpleNamespace(candidates=[
-        SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(
-            inline_data=SimpleNamespace(data=pcm, mime_type='audio/L16;rate=24000'))]))])
+    client.interactions.create.return_value = SimpleNamespace(output_audio=SimpleNamespace(
+        data=b64encode(pcm).decode(), mime_type='audio/l16', channels=1, sample_rate=24000
+    ))
     data, duration = create_narration(client, 'Merhaba')
     with wave.open(BytesIO(data)) as wav:
         assert (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) == (1, 2, 24000)
         assert wav.readframes(wav.getnframes()) == pcm
     assert duration == 1
-    assert client.models.generate_content.call_args.kwargs['config'].response_modalities == ['AUDIO']
+    options = client.interactions.create.call_args.kwargs
+    assert options["response_format"] == {"type": "audio"}
+    assert options["generation_config"]["speech_config"] == [{"voice": "Orus"}]
+    assert options["store"] is False
 
 
-@pytest.mark.parametrize('candidates', [None, [], [SimpleNamespace(content=None)]])
-def test_missing_audio(candidates):
+@pytest.mark.parametrize("audio", [None, SimpleNamespace(data=None), SimpleNamespace(
+    data=b64encode(b"invalid").decode(), mime_type="audio/mp3"
+)])
+def test_missing_audio(audio):
     client = Mock()
-    client.models.generate_content.return_value = SimpleNamespace(candidates=candidates)
-    with pytest.raises(ValueError, match='Ses servisi'):
-        create_narration(client, 'Merhaba')
+    client.interactions.create.return_value = SimpleNamespace(output_audio=audio)
+    with pytest.raises(ValueError):
+        create_narration(client, "Merhaba")
 
 
 def test_login_gate():
