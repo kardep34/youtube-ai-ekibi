@@ -85,7 +85,8 @@ def test_legacy_tts_request_and_safe_errors():
     assert request["model"] == "gemini-2.5-flash-preview-tts"
     assert request["contents"].endswith("Türkçe örnek.")
     assert request["config"].response_modalities == ["AUDIO"]
-    assert request["config"].speech_config.voice_config.prebuilt_voice_config.voice_name == "Orus"
+    speech = request["config"].http_options.extra_body["generationConfig"]["speechConfig"]
+    assert speech == {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Orus"}}}
     report = str(diagnostics)
     assert "HTTP 404" in report and "HTTP 400" in report
     assert "NOT_FOUND" in report and "INVALID_ARGUMENT" in report

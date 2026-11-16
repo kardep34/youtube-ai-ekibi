@@ -1,16 +1,21 @@
 from base64 import b64decode
 from hashlib import sha256
+from importlib.metadata import version
 from io import BytesIO
 import json
 import re
 import wave
 
 import streamlit as st
+from google import genai
 from google.genai import types
 
 
 SAMPLE_TITLE = "Kara Deliğe Düşersen Ne Olur?"
 SAMPLE_TEXT = "Bir kara deliğe düşseydin ne olurdu? Yaklaştıkça, kara deliğe daha yakın olan ayakların başından daha güçlü çekilirdi. Bu fark seni uzatmaya başlardı. Ama kara delik çok büyükse, olay ufkunu geçtiğin an hiçbir şey hissetmeyebilirsin. Yine de o sınırdan sonra geri dönüş yok. Oradan gönderdiğin bir ışık sinyali bile dışarı ulaşamaz."
+
+VOICE_API_VERSION = "v1beta"
+VOICE_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts")
 
 
 def gemini_http_status(exc):
@@ -79,13 +84,44 @@ def safe_gemini_error(exc):
     return " · ".join(dict.fromkeys(parts))
 
 
-def listed_voice_models(client):
-    return sorted({
-        model.name.removeprefix("models/")
-        for model in client.models.list()
-        if model.name and "tts" in model.name.lower()
-        and model.name.replace("/", "").replace(".", "").replace("-", "").isalnum()
-    })
+def voice_client():
+    return genai.Client(
+        api_key=st.secrets["GEMINI_API_KEY"],
+        vertexai=False,
+        http_options=types.HttpOptions(api_version=VOICE_API_VERSION),
+    )
+
+
+def voice_model_report(default_client, tts_client):
+    api_options = default_client._api_client._http_options
+    default_version = api_options.api_version
+    if default_version not in ("v1", "v1beta", "v1alpha", "v1beta1"):
+        default_version = "belirlenemedi"
+    report = [
+        f"Google GenAI SDK {version('google-genai')} · Varsayılan API: {default_version}"
+        f" · Seslendirme API: {VOICE_API_VERSION}",
+    ]
+    for api_version, client in {default_version: default_client, VOICE_API_VERSION: tts_client}.items():
+        try:
+            models = list(client.models.list())
+            voice_models = sorted({
+                model.name.removeprefix("models/")
+                for model in models
+                if model.name and "tts" in model.name.lower()
+                and model.name.replace("/", "").replace(".", "").replace("-", "").isalnum()
+            })
+            names = ", ".join(voice_models) if voice_models else "yok"
+            report.append(f"{api_version} · {len(models)} model · TTS: {names}")
+        except Exception as exc:
+            report.append(f"{api_version} · Model listesi: {safe_gemini_error(exc)}")
+
+    for model in VOICE_MODELS:
+        try:
+            tts_client.models.get(model=model)
+            report.append(f"{VOICE_API_VERSION} · {model} · Model bilgisi alındı.")
+        except Exception as exc:
+            report.append(f"{VOICE_API_VERSION} · {model} · {safe_gemini_error(exc)}")
+    return "\n".join(report)
 
 
 def create_narration(client, text, diagnostics=None):
@@ -96,7 +132,7 @@ def create_narration(client, text, diagnostics=None):
     )
     try:
         response = client.interactions.create(
-            model="gemini-3.1-flash-tts-preview",
+            model=VOICE_MODELS[0],
             input=prompt,
             response_format={"type": "audio"},
             generation_config={"speech_config": [{"voice": "Orus"}]},
@@ -115,15 +151,18 @@ def create_narration(client, text, diagnostics=None):
 
     try:
         result = client.models.generate_content(
-            model="gemini-2.5-flash-preview-tts",
+            model=VOICE_MODELS[1],
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Orus")
-                    )
-                ),
+                # Use the documented REST field names for the nested voice config.
+                http_options=types.HttpOptions(extra_body={
+                    "generationConfig": {
+                        "speechConfig": {
+                            "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Orus"}}
+                        }
+                    }
+                }),
             ),
         )
         for part in result.parts or []:
@@ -287,10 +326,8 @@ def render_task_inbox(bot_roles, run_bot, make_client):
     script = st.text_area("Seslendirilecek Türkçe metin", max_chars=2500, key="vortex_task_script")
     if st.button("Hesaptaki ses modellerini kontrol et"):
         try:
-            models = listed_voice_models(make_client())
-            st.session_state["vortex_task_voice_models"] = (
-                ", ".join(models) if models else "Gemini model listesinde TTS modeli görünmedi."
-            )
+            with make_client() as default_client, voice_client() as tts_client:
+                st.session_state["vortex_task_voice_models"] = voice_model_report(default_client, tts_client)
         except Exception as exc:
             st.session_state["vortex_task_voice_models"] = safe_gemini_error(exc)
     if st.session_state.get("vortex_task_voice_models"):
@@ -301,10 +338,8 @@ def render_task_inbox(bot_roles, run_bot, make_client):
         diagnostics = []
         st.session_state["vortex_task_voice_diagnostics"] = diagnostics
         try:
-            with st.spinner("Ses örneği hazırlanıyor…"):
-                st.session_state["vortex_task_audio"] = create_narration(
-                    make_client(), script, diagnostics
-                )
+            with st.spinner("Ses örneği hazırlanıyor…"), voice_client() as client:
+                st.session_state["vortex_task_audio"] = create_narration(client, script, diagnostics)
         except ValueError:
             st.error("Gemini yanıtında kullanılabilir ses verisi bulunamadı.")
         except Exception as exc:
