@@ -254,6 +254,21 @@ if st.button("📋 Bot Sonuçlarını Aktar"):
     if not paket:
         st.warning("Önce Tüm Ekibi Çalıştır.")
     else:
+        st.session_state["aktarilan_icerik"] = paket
+        st.success("İçerik hazır. Aşağıdan kopyalayabilirsin.")
+
+if st.session_state.get("aktarilan_icerik"):
+    st.text_area(
+        "Hazırlanan açıklama",
+        value=st.session_state["aktarilan_icerik"],
+        height=250
+    )
+
+if st.button("📋 Bot Sonuçlarını Aktar"):
+    paket = st.session_state.get("icerik_paketi", "")
+    if not paket:
+        st.warning("Önce Tüm Ekibi Çalıştır.")
+    else:
         st.session_state["video_baslik"] = (
             st.session_state.get("video_baslik")
             or "Mariana Çukuru: Derinliklerde Neler Var?"
