@@ -12,7 +12,63 @@ SAMPLE_TITLE = "Kara Deliğe Düşersen Ne Olur?"
 SAMPLE_TEXT = "Bir kara deliğe düşseydin ne olurdu? Yaklaştıkça, kara deliğe daha yakın olan ayakların başından daha güçlü çekilirdi. Bu fark seni uzatmaya başlardı. Ama kara delik çok büyükse, olay ufkunu geçtiğin an hiçbir şey hissetmeyebilirsin. Yine de o sınırdan sonra geri dönüş yok. Oradan gönderdiğin bir ışık sinyali bile dışarı ulaşamaz."
 
 
-def create_narration(client, text):
+def gemini_http_status(exc):
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    return status if type(status) is int and 400 <= status <= 599 else None
+
+
+def safe_gemini_error(exc):
+    """Show only reviewed provider signals, never the raw response or request."""
+    status = gemini_http_status(exc)
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        body = getattr(exc, "response_json", None)
+    if not isinstance(body, dict):
+        body = {}
+    provider = body.get("error", body)
+    if not isinstance(provider, dict):
+        provider = {}
+    message = str(provider.get("message") or getattr(exc, "message", "")).lower()
+    signals = (
+        (("user location is not supported", "location is not supported"), "Proje veya sunucu bölgesi Gemini API için desteklenmiyor."),
+        (("api key not valid", "api key invalid"), "Gemini API anahtarını geçersiz buldu."),
+        (("billing", "paid tier"), "Sağlayıcı yanıtı faturalandırma veya ücretli katman koşuluna işaret ediyor."),
+        (("not found for api version",), "Model bu API sürümünde bulunamadı veya bu yöntemi desteklemiyor."),
+        (("not supported for generatecontent", "does not support generatecontent"), "Model GenerateContent yöntemini desteklemiyor."),
+        (("not supported for interactions", "does not support interactions"), "Model Interactions yöntemini desteklemiyor."),
+        (("only supports text output", "requested modality", "response_modalities"), "İstenen ses çıktı biçimi reddedildi."),
+        (("voice is not supported", "invalid voice", "unsupported voice", "voice name"), "Seçilen ses yapılandırması reddedildi."),
+        (("invalid json payload", "unknown name", "unknown field"), "Gönderilen istek alanlarından biri API şemasıyla uyuşmuyor."),
+        (("quota", "rate limit"), "Sağlayıcı kota veya istek sınırı bildirdi."),
+        (("requested entity was not found",), "Sağlayıcı hedef kaynağı bulamadı; hangi kaynağın eksik olduğunu belirtmedi."),
+    )
+    parts = [f"HTTP {status}" if status else "HTTP kodu yok"]
+    known_status = {"INVALID_ARGUMENT", "NOT_FOUND", "PERMISSION_DENIED", "UNAUTHENTICATED",
+                    "RESOURCE_EXHAUSTED", "UNAVAILABLE", "FAILED_PRECONDITION", "INTERNAL"}
+    if provider.get("status") in known_status:
+        parts.append(provider["status"])
+    reasons = {"API_KEY_INVALID", "API_KEY_SERVICE_BLOCKED", "SERVICE_DISABLED",
+               "BILLING_DISABLED", "RATE_LIMIT_EXCEEDED", "CONSUMER_INVALID",
+               "ACCESS_TOKEN_SCOPE_INSUFFICIENT", "LOCATION_POLICY_VIOLATED"}
+    for detail in provider.get("details") or []:
+        if isinstance(detail, dict) and detail.get("reason") in reasons:
+            parts.append(detail["reason"])
+    parts.append(next((description for phrases, description in signals
+                       if any(phrase in message for phrase in phrases)),
+                      "Sağlayıcıdan gösterilebilir özel hata nedeni alınamadı."))
+    return " · ".join(dict.fromkeys(parts))
+
+
+def listed_voice_models(client):
+    return sorted({
+        model.name.removeprefix("models/")
+        for model in client.models.list()
+        if model.name and "tts" in model.name.lower()
+        and model.name.replace("/", "").replace(".", "").replace("-", "").isalnum()
+    })
+
+
+def create_narration(client, text, diagnostics=None):
     prompt = (
         "Read only the transcript in natural Turkish with a deep adult male "
         "documentary voice. Use brief pauses and aim for 30 seconds.\n\n"
@@ -27,25 +83,58 @@ def create_narration(client, text):
             store=False,
         )
     except Exception as exc:
-        if (getattr(exc, "status_code", None) or getattr(exc, "code", None)) != 404:
+        if diagnostics is not None:
+            diagnostics.append(("Gemini 3.1 Flash TTS · Interactions", safe_gemini_error(exc)))
+        if gemini_http_status(exc) not in (400, 404):
             raise
-        result = client.models.generate_content(
-            model="gemini-3.8-flash-lite-tts",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Orus")
-                    )
+        try:
+            result = client.models.generate_content(
+                model="gemini-3.8-flash-lite-tts",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Orus")
+                        )
+                    ),
                 ),
-            ),
-        )
-        for part in result.parts or []:
-            audio = part.inline_data
-            if audio and audio.data and (audio.mime_type or "").lower().startswith("audio/"):
-                return narration_wav(audio.data, audio.mime_type)
-        raise ValueError("Ses servisi bir ses örneği döndürmedi.")
+            )
+        except Exception as exc:
+            if diagnostics is not None:
+                diagnostics.append(("Gemini 3.8 Flash-Lite TTS · GenerateContent", safe_gemini_error(exc)))
+            if gemini_http_status(exc) not in (400, 404):
+                raise
+            transcript = [{
+                "type": "user_input",
+                "content": [{
+                    "type": "text",
+                    "text": text,
+                    "annotations": [{
+                        "type": "speech_metadata",
+                        "style": "Natural standard Turkish, deep adult male documentary narration, "
+                                 "clear diction, short pauses, approximately 30 seconds",
+                    }],
+                }],
+            }]
+            try:
+                response = client.interactions.create(
+                    model="gemini-3.8-flash-lite-tts",
+                    input=transcript,
+                    response_format={"type": "audio"},
+                    generation_config={"speech_config": [{"voice": "Orus"}]},
+                    store=False,
+                )
+            except Exception as exc:
+                if diagnostics is not None:
+                    diagnostics.append(("Gemini 3.8 Flash-Lite TTS · Interactions", safe_gemini_error(exc)))
+                raise
+        else:
+            for part in result.parts or []:
+                audio = part.inline_data
+                if audio and audio.data and (audio.mime_type or "").lower().startswith("audio/"):
+                    return narration_wav(audio.data, audio.mime_type)
+            raise ValueError("Ses servisi bir ses örneği döndürmedi.")
 
     audio = response.output_audio
     if not audio or not audio.data:
@@ -204,25 +293,33 @@ def render_task_inbox(bot_roles, run_bot, make_client):
                 st.text(output)
 
     script = st.text_area("Seslendirilecek Türkçe metin", max_chars=2500, key="vortex_task_script")
+    if st.button("Hesaptaki ses modellerini kontrol et"):
+        try:
+            models = listed_voice_models(make_client())
+            st.session_state["vortex_task_voice_models"] = (
+                ", ".join(models) if models else "Gemini model listesinde TTS modeli görünmedi."
+            )
+        except Exception as exc:
+            st.session_state["vortex_task_voice_models"] = safe_gemini_error(exc)
+    if st.session_state.get("vortex_task_voice_models"):
+        st.text(st.session_state["vortex_task_voice_models"])
+
     if st.button("Ses örneği üret", disabled=not script.strip()):
         st.session_state.pop("vortex_task_audio", None)
+        diagnostics = []
+        st.session_state["vortex_task_voice_diagnostics"] = diagnostics
         try:
             with st.spinner("Ses örneği hazırlanıyor…"):
-                st.session_state["vortex_task_audio"] = create_narration(make_client(), script)
+                st.session_state["vortex_task_audio"] = create_narration(
+                    make_client(), script, diagnostics
+                )
         except ValueError:
             st.error("Gemini yanıtında kullanılabilir ses verisi bulunamadı.")
         except Exception as exc:
-            status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-            messages = {
-                400: "Gemini ses isteğini geçersiz buldu.",
-                401: "Gemini kimlik doğrulaması başarısız.",
-                403: "Gemini projesinin bu ses modeline erişimi yok.",
-                404: "Ses modeli bu Gemini projesinde bulunamadı.",
-                429: "Gemini ses kotası veya istek sınırı aşıldı.",
-                503: "Gemini ses hizmeti geçici olarak kullanılamıyor.",
-            }
-            detail = messages.get(status, "Ses üretimi tamamlanamadı.")
-            st.error(f"{detail} (HTTP {status})" if type(status) is int and 400 <= status <= 599 else detail)
+            st.error(safe_gemini_error(exc))
+
+    for route, detail in st.session_state.get("vortex_task_voice_diagnostics", []):
+        st.text(f"{route}: {detail}")
 
     audio = st.session_state.get("vortex_task_audio")
     if audio:

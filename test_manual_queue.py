@@ -60,3 +60,32 @@ def test_missing_interactions_model_falls_back_to_flash_lite():
     wav, duration = create_narration(client, "Deneme")
     assert wav.startswith(b"RIFF") and duration == 1
     assert client.models.generate_content.call_args.kwargs["model"] == "gemini-3.8-flash-lite-tts"
+
+
+def test_corrected_voice_schema_and_safe_prior_errors():
+    from base64 import b64encode
+    from task_inbox import safe_gemini_error
+
+    def error(code, message):
+        exc = RuntimeError("never display raw exceptions")
+        exc.status_code = code
+        exc.body = {"error": {"message": message, "status": "NOT_FOUND" if code == 404 else "INVALID_ARGUMENT"}}
+        return exc
+
+    missing = error(404, "Model not found for API version, secret example-not-for-display")
+    invalid = error(400, "Invalid JSON payload received; authorization: hidden")
+    client = Mock()
+    client.interactions.create.side_effect = [missing, SimpleNamespace(
+        output_audio=SimpleNamespace(data=b64encode(bytes(48000)).decode(), mime_type="audio/l16")
+    )]
+    client.models.generate_content.side_effect = invalid
+    diagnostics = []
+    _, duration = create_narration(client, "Türkçe örnek.", diagnostics)
+    request = client.interactions.create.call_args.kwargs
+    assert request["model"] == "gemini-3.8-flash-lite-tts"
+    assert request["input"][0]["content"][0]["text"] == "Türkçe örnek."
+    assert request["input"][0]["content"][0]["annotations"][0]["type"] == "speech_metadata"
+    assert duration == 1
+    report = str(diagnostics) + safe_gemini_error(invalid)
+    assert "HTTP 404" in report and "HTTP 400" in report
+    assert "example-not-for-display" not in report and "authorization" not in report
