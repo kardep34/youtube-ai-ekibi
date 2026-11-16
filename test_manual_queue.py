@@ -80,13 +80,14 @@ def test_legacy_tts_request_and_safe_errors():
     }})
     diagnostics = []
     with pytest.raises(ClientError):
-        create_narration(client, "Türkçe örnek.", diagnostics)
+        create_narration(client, "Türkçe örnek.", diagnostics, voice="Algenib")
     request = client.models.generate_content.call_args.kwargs
     assert request["model"] == "gemini-2.5-flash-preview-tts"
     assert request["contents"].endswith("Türkçe örnek.")
     assert request["config"].response_modalities == ["AUDIO"]
     speech = request["config"].http_options.extra_body["generationConfig"]["speechConfig"]
-    assert speech == {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Orus"}}}
+    assert speech == {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Algenib"}}}
+    assert client.interactions.create.call_args.kwargs["generation_config"]["speech_config"] == [{"voice": "Algenib"}]
     report = str(diagnostics)
     assert "HTTP 404" in report and "HTTP 400" in report
     assert "NOT_FOUND" in report and "INVALID_ARGUMENT" in report

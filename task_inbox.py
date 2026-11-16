@@ -12,8 +12,22 @@ from google.genai import types
 
 
 SAMPLE_TITLE = "Kara Deliğe Düşersen Ne Olur?"
-SAMPLE_TEXT = "Bir kara deliğe düşseydin ne olurdu? Yaklaştıkça, kara deliğe daha yakın olan ayakların başından daha güçlü çekilirdi. Bu fark seni uzatmaya başlardı. Ama kara delik çok büyükse, olay ufkunu geçtiğin an hiçbir şey hissetmeyebilirsin. Yine de o sınırdan sonra geri dönüş yok. Oradan gönderdiğin bir ışık sinyali bile dışarı ulaşamaz."
-
+SAMPLE_TEXT = (
+    "Bir an için hayal et... Uzayın derinliklerindesin. Karşında, ışığın bile kaçamadığı devasa bir kara delik var. "
+    "Geri dönmek istiyorsun. Ama artık çok geç olabilir. Çünkü birazdan, evrenin en korkutucu sınırını geçeceksin. "
+    "Ve o sınırın ötesinden... geri dönüş yok."
+)
+VOICE_DIRECTION = (
+    "Doğal Türkiye Türkçesiyle, tok ve güçlü bir yetişkin erkek sesiyle anlat. Derin rezonans kullan. "
+    "Sakin ama otoriter, sinematik belgesel tonunda oku. Bağırma, robotik okuma yapma. "
+    "Üç noktalarda kısa, doğal duraklamalar yap. Yalnızca aşağıdaki metni seslendir."
+)
+TTS_VOICES = (
+    "Algenib", "Orus", "Charon", "Alnilam", "Gacrux", "Schedar", "Zephyr", "Puck", "Kore", "Fenrir",
+    "Leda", "Aoede", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina",
+    "Erinome", "Rasalgethi", "Laomedeia", "Achernar", "Pulcherrima", "Achird", "Zubenelgenubi",
+    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+)
 VOICE_API_VERSION = "v1beta"
 VOICE_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts")
 
@@ -124,18 +138,16 @@ def voice_model_report(default_client, tts_client):
     return "\n".join(report)
 
 
-def create_narration(client, text, diagnostics=None):
-    prompt = (
-        "Read only the transcript in natural Turkish with a deep adult male "
-        "documentary voice. Use brief pauses and aim for 30 seconds.\n\n"
-        f"TRANSCRIPT:\n{text}"
-    )
+def create_narration(client, text, diagnostics=None, *, voice="Orus"):
+    if voice not in TTS_VOICES:
+        raise ValueError("Desteklenmeyen ses seçimi.")
+    prompt = f"{VOICE_DIRECTION}\n\nSESLENDİRİLECEK METİN:\n{text}"
     try:
         response = client.interactions.create(
             model=VOICE_MODELS[0],
             input=prompt,
             response_format={"type": "audio"},
-            generation_config={"speech_config": [{"voice": "Orus"}]},
+            generation_config={"speech_config": [{"voice": voice}]},
             store=False,
         )
         audio = response.output_audio
@@ -159,7 +171,7 @@ def create_narration(client, text, diagnostics=None):
                 http_options=types.HttpOptions(extra_body={
                     "generationConfig": {
                         "speechConfig": {
-                            "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Orus"}}
+                            "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}
                         }
                     }
                 }),
@@ -324,6 +336,7 @@ def render_task_inbox(bot_roles, run_bot, make_client):
                 st.text(output)
 
     script = st.text_area("Seslendirilecek Türkçe metin", max_chars=2500, key="vortex_task_script")
+    voice = st.selectbox("Gemini sesi", TTS_VOICES, key="vortex_task_voice")
     if st.button("Hesaptaki ses modellerini kontrol et"):
         try:
             with make_client() as default_client, voice_client() as tts_client:
@@ -339,7 +352,8 @@ def render_task_inbox(bot_roles, run_bot, make_client):
         st.session_state["vortex_task_voice_diagnostics"] = diagnostics
         try:
             with st.spinner("Ses örneği hazırlanıyor…"), voice_client() as client:
-                st.session_state["vortex_task_audio"] = create_narration(client, script, diagnostics)
+                st.session_state["vortex_task_audio"] = create_narration(client, script, diagnostics, voice=voice)
+                st.session_state["vortex_task_audio_voice"] = voice
         except ValueError:
             st.error("Gemini yanıtında kullanılabilir ses verisi bulunamadı.")
         except Exception as exc:
@@ -352,7 +366,9 @@ def render_task_inbox(bot_roles, run_bot, make_client):
     if audio:
         data, duration = audio
         st.audio(data, format="audio/wav")
-        st.caption(f"Ölçülen süre: {duration:.1f} saniye")
+        recorded_voice = st.session_state.get("vortex_task_audio_voice")
+        voice_label = f"Ses: {recorded_voice} · " if recorded_voice else ""
+        st.caption(f"{voice_label}Ölçülen süre: {duration:.1f} saniye")
         st.download_button("WAV indir", data, "vortex360-ses-ornegi.wav", "audio/wav")
 
     render_manual_queue(bot_roles, run_bot, make_client)
