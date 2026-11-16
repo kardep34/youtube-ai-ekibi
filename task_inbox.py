@@ -1,8 +1,9 @@
+from base64 import b64decode
 from io import BytesIO
 import wave
 
 import streamlit as st
-from google.genai import errors, types
+from google.genai import errors
 
 
 SAMPLE_TITLE = "Kara Deliğe Düşersen Ne Olur?"
@@ -10,29 +11,36 @@ SAMPLE_TEXT = "Bir kara deliğe düşseydin ne olurdu? Yaklaştıkça, kara deli
 
 
 def create_narration(client, text):
-    response = client.models.generate_content(
+    response = client.interactions.create(
         model="gemini-3.1-flash-tts-preview",
-        contents="Standart Türkiye Türkçesiyle, tok ve doğal bir yetişkin erkek belgesel sesi kullan. Sakin konuş ve kısa, doğal duraklar ver. "
-        "Yalnızca aşağıdaki metni seslendir, yaklaşık 30 saniye hedefle.\n\n" + text,
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Orus")
-                )
-            ),
+        input=(
+            "Read only the transcript in natural Turkish with a deep adult male "
+            "documentary voice. Use brief pauses and aim for 30 seconds.\n\n"
+            f"TRANSCRIPT:\n{text}"
         ),
+        response_format={"type": "audio"},
+        generation_config={"speech_config": [{"voice": "Orus"}]},
+        store=False,
     )
-    for candidate in response.candidates or []:
-        for part in getattr(candidate.content, "parts", None) or []:
-            audio = part.inline_data
-            if audio and audio.data and (audio.mime_type or "").startswith("audio/"):
-                with BytesIO() as buffer:
-                    with wave.open(buffer, "wb") as output:
-                        output.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
-                        output.writeframes(audio.data)
-                    return buffer.getvalue(), len(audio.data) / 48000
-    raise ValueError("Ses servisi bir ses örneği döndürmedi.")
+    audio = response.output_audio
+    if not audio or not audio.data:
+        raise ValueError("Ses servisi bir ses örneği döndürmedi.")
+
+    data = b64decode(audio.data, validate=True)
+    if data.startswith(b"RIFF"):
+        with wave.open(BytesIO(data), "rb") as output:
+            return data, output.getnframes() / output.getframerate()
+    mime = (audio.mime_type or "").lower().split(";", 1)[0]
+    if mime != "audio/l16" or not data or len(data) % 2:
+        raise ValueError("Gemini desteklenmeyen bir ses biçimi döndürdü.")
+
+    channels = audio.channels or 1
+    sample_rate = audio.sample_rate or 24000
+    with BytesIO() as buffer:
+        with wave.open(buffer, "wb") as output:
+            output.setparams((channels, 2, sample_rate, 0, "NONE", "not compressed"))
+            output.writeframes(data)
+        return buffer.getvalue(), len(data) / (2 * channels * sample_rate)
 
 
 def render_task_inbox(bot_roles, run_bot, make_client):
