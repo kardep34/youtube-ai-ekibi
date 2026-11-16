@@ -261,7 +261,7 @@ if st.session_state.get("aktarilan_icerik"):
     st.text_area(
         "Hazırlanan açıklama",
     )
-        height=250
+    
     paket = st.session_state.get("icerik_paketi", "")
     if not paket:
         st.warning("Önce Tüm Ekibi Çalıştır.")
