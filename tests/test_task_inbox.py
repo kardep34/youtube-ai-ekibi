@@ -45,6 +45,7 @@ def test_narration_wav_and_duration():
 def test_missing_audio(audio):
     client = Mock()
     client.interactions.create.return_value = SimpleNamespace(output_audio=audio)
+    client.models.generate_content.return_value = SimpleNamespace(parts=[])
     with pytest.raises(ValueError):
         create_narration(client, "Merhaba")
 
