@@ -12,13 +12,13 @@ SAMPLE_TEXT = "Bir kara deliğe düşseydin ne olurdu? Yaklaştıkça, kara deli
 def create_narration(client, text):
     response = client.models.generate_content(
         model="gemini-2.5-flash-preview-tts",
-        contents="Metni Türkçe, sakin ve merak uyandıran bir belgesel tonuyla oku. "
+        contents="Standart Türkiye Türkçesiyle, tok ve doğal bir yetişkin erkek belgesel sesi kullan. Sakin konuş ve kısa, doğal duraklar ver. "
         "Yalnızca aşağıdaki metni seslendir, yaklaşık 30 saniye hedefle.\n\n" + text,
         config=types.GenerateContentConfig(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Orus")
                 )
             ),
         ),
