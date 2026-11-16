@@ -1,11 +1,11 @@
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from task_inbox import parse_task_packet
+from task_inbox import create_narration, parse_task_packet
 
 
 def button(at, label):
@@ -45,3 +45,18 @@ def test_login_and_manual_queue_dedup_and_retry():
         assert synth.call_count == 6
     assert job["status"] == "Tamamlandı" and len(job["outputs"]) == 5
     assert not at.exception
+
+
+def test_missing_interactions_model_falls_back_to_flash_lite():
+    client = Mock()
+    error = RuntimeError("not found")
+    error.status_code = 404
+    client.interactions.create.side_effect = error
+    client.models.generate_content.return_value = SimpleNamespace(
+        parts=[SimpleNamespace(inline_data=SimpleNamespace(
+            data=bytes(48000), mime_type="audio/L16;rate=24000"
+        ))]
+    )
+    wav, duration = create_narration(client, "Deneme")
+    assert wav.startswith(b"RIFF") and duration == 1
+    assert client.models.generate_content.call_args.kwargs["model"] == "gemini-3.8-flash-lite-tts"

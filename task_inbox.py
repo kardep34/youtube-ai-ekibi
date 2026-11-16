@@ -5,6 +5,7 @@ import json
 import wave
 
 import streamlit as st
+from google.genai import types
 
 
 SAMPLE_TITLE = "Kara Deliğe Düşersen Ne Olur?"
@@ -12,31 +13,59 @@ SAMPLE_TEXT = "Bir kara deliğe düşseydin ne olurdu? Yaklaştıkça, kara deli
 
 
 def create_narration(client, text):
-    response = client.interactions.create(
-        model="gemini-3.1-flash-tts-preview",
-        input=(
-            "Read only the transcript in natural Turkish with a deep adult male "
-            "documentary voice. Use brief pauses and aim for 30 seconds.\n\n"
-            f"TRANSCRIPT:\n{text}"
-        ),
-        response_format={"type": "audio"},
-        generation_config={"speech_config": [{"voice": "Orus"}]},
-        store=False,
+    prompt = (
+        "Read only the transcript in natural Turkish with a deep adult male "
+        "documentary voice. Use brief pauses and aim for 30 seconds.\n\n"
+        f"TRANSCRIPT:\n{text}"
     )
+    try:
+        response = client.interactions.create(
+            model="gemini-3.1-flash-tts-preview",
+            input=prompt,
+            response_format={"type": "audio"},
+            generation_config={"speech_config": [{"voice": "Orus"}]},
+            store=False,
+        )
+    except Exception as exc:
+        if (getattr(exc, "status_code", None) or getattr(exc, "code", None)) != 404:
+            raise
+        result = client.models.generate_content(
+            model="gemini-3.8-flash-lite-tts",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Orus")
+                    )
+                ),
+            ),
+        )
+        for part in result.parts or []:
+            audio = part.inline_data
+            if audio and audio.data and (audio.mime_type or "").lower().startswith("audio/"):
+                return narration_wav(audio.data, audio.mime_type)
+        raise ValueError("Ses servisi bir ses örneği döndürmedi.")
+
     audio = response.output_audio
     if not audio or not audio.data:
         raise ValueError("Ses servisi bir ses örneği döndürmedi.")
+    return narration_wav(
+        b64decode(audio.data, validate=True), audio.mime_type,
+        getattr(audio, "channels", None), getattr(audio, "sample_rate", None),
+    )
 
-    data = b64decode(audio.data, validate=True)
+
+def narration_wav(data, mime_type, channels=None, sample_rate=None):
     if data.startswith(b"RIFF"):
         with wave.open(BytesIO(data), "rb") as output:
             return data, output.getnframes() / output.getframerate()
-    mime = (audio.mime_type or "").lower().split(";", 1)[0]
+    mime = (mime_type or "").lower().split(";", 1)[0]
     if mime != "audio/l16" or not data or len(data) % 2:
         raise ValueError("Gemini desteklenmeyen bir ses biçimi döndürdü.")
 
-    channels = audio.channels or 1
-    sample_rate = audio.sample_rate or 24000
+    channels = channels or 1
+    sample_rate = sample_rate or 24000
     with BytesIO() as buffer:
         with wave.open(buffer, "wb") as output:
             output.setparams((channels, 2, sample_rate, 0, "NONE", "not compressed"))
