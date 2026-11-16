@@ -262,8 +262,6 @@ if st.session_state.get("aktarilan_icerik"):
         "Hazırlanan açıklama",
         value=st.session_state["aktarilan_icerik"],
         height=250
-
-if st.button("📋 Bot Sonuçlarını Aktar"):
     paket = st.session_state.get("icerik_paketi", "")
     if not paket:
         st.warning("Önce Tüm Ekibi Çalıştır.")
