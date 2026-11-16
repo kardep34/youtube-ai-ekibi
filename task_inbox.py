@@ -80,12 +80,9 @@ def safe_gemini_error(exc):
             parts.append(detail["reason"])
     if status == 400:
         fields = {
-            "contents": "contents",
-            "generationconfig": "generationConfig",
-            "responsemodalities": "responseModalities",
-            "speechconfig": "speechConfig",
-            "voiceconfig": "voiceConfig",
-            "prebuiltvoiceconfig": "prebuiltVoiceConfig",
+            "contents": "contents", "generationconfig": "generationConfig",
+            "responsemodalities": "responseModalities", "speechconfig": "speechConfig",
+            "voiceconfig": "voiceConfig", "prebuiltvoiceconfig": "prebuiltVoiceConfig",
             "voicename": "voiceName",
         }
         match = re.search(r'unknown (?:name|field)\s+["\']([a-z_]+)["\']', message)
@@ -128,7 +125,6 @@ def voice_model_report(default_client, tts_client):
             report.append(f"{api_version} · {len(models)} model · TTS: {names}")
         except Exception as exc:
             report.append(f"{api_version} · Model listesi: {safe_gemini_error(exc)}")
-
     for model in VOICE_MODELS:
         try:
             tts_client.models.get(model=model)
@@ -144,11 +140,8 @@ def create_narration(client, text, diagnostics=None, *, voice="Orus"):
     prompt = f"{VOICE_DIRECTION}\n\nSESLENDİRİLECEK METİN:\n{text}"
     try:
         response = client.interactions.create(
-            model=VOICE_MODELS[0],
-            input=prompt,
-            response_format={"type": "audio"},
-            generation_config={"speech_config": [{"voice": voice}]},
-            store=False,
+            model=VOICE_MODELS[0], input=prompt, response_format={"type": "audio"},
+            generation_config={"speech_config": [{"voice": voice}]}, store=False,
         )
         audio = response.output_audio
         if not audio or not audio.data:
@@ -160,20 +153,15 @@ def create_narration(client, text, diagnostics=None, *, voice="Orus"):
     except Exception as exc:
         if diagnostics is not None:
             diagnostics.append(("Gemini 3.1 Flash TTS · Interactions", safe_gemini_error(exc)))
-
     try:
         result = client.models.generate_content(
-            model=VOICE_MODELS[1],
-            contents=prompt,
+            model=VOICE_MODELS[1], contents=prompt,
             config=types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
-                # Use the documented REST field names for the nested voice config.
                 http_options=types.HttpOptions(extra_body={
-                    "generationConfig": {
-                        "speechConfig": {
-                            "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}
-                        }
-                    }
+                    "generationConfig": {"speechConfig": {
+                        "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}
+                    }}
                 }),
             ),
         )
@@ -195,7 +183,6 @@ def narration_wav(data, mime_type, channels=None, sample_rate=None):
     mime = (mime_type or "").lower().split(";", 1)[0]
     if mime != "audio/l16" or not data or len(data) % 2:
         raise ValueError("Gemini desteklenmeyen bir ses biçimi döndürdü.")
-
     channels = channels or 1
     sample_rate = sample_rate or 24000
     with BytesIO() as buffer:
@@ -228,7 +215,6 @@ def render_manual_queue(bot_roles, run_bot, make_client):
         raw = st.text_area("Görev paketi (JSON)", max_chars=40000)
         roles = st.multiselect("Kuyruk robotları", list(bot_roles), default=list(bot_roles))
         add = st.form_submit_button("Oturum kuyruğuna ekle")
-
     if add:
         try:
             title, brief = parse_task_packet(raw)
@@ -249,7 +235,6 @@ def render_manual_queue(bot_roles, run_bot, make_client):
                     "title": title, "brief": brief, "roles": roles,
                     "outputs": {}, "failed": [], "status": "Bekliyor",
                 }
-
     for task_id, job in jobs.items():
         with st.expander(f"{job['title']} · {job['status']}"):
             st.text(job["brief"])
@@ -281,7 +266,6 @@ def render_manual_queue(bot_roles, run_bot, make_client):
                 st.text(result)
             if job["failed"]:
                 st.warning("Yanıt alınamayan robotlar: " + ", ".join(job["failed"]))
-
     if jobs:
         st.download_button(
             "Oturum görevlerini indir",
@@ -289,6 +273,68 @@ def render_manual_queue(bot_roles, run_bot, make_client):
             "vortex360-gorevler.json", "application/json",
         )
 
+
+def render_voice_studio():
+    st.subheader("Ses Karşılaştırma Stüdyosu")
+    script = st.text_area(
+        "Ortak Türkçe belgesel metni", value=SAMPLE_TEXT, max_chars=2500,
+        key="vortex_studio_script",
+    ).strip()
+    selected = st.multiselect(
+        "Karşılaştırılacak Gemini sesleri", TTS_VOICES,
+        default=("Algenib", "Alnilam", "Gacrux", "Charon", "Rasalgethi"),
+        max_selections=5, key="vortex_studio_voices",
+    )
+    generate = st.button(
+        "Seçili sesleri üret", key="vortex_studio_generate",
+        disabled=not script or not selected or len(selected) > 5,
+    )
+    if not script:
+        return
+
+    studio = st.session_state.setdefault("vortex_voice_studio", {})
+    script_id = sha256(script.encode("utf-8")).hexdigest()
+    batch = studio.get(script_id)
+    if generate and len(selected) <= 5:
+        batch = studio.setdefault(script_id, {"clips": {}, "errors": {}, "favorite": None})
+        for voice in selected:
+            if voice in batch["clips"]:
+                continue
+            diagnostics = []
+            try:
+                with st.spinner(f"{voice} hazırlanıyor…"), voice_client() as client:
+                    recording = create_narration(client, script, diagnostics, voice=voice)
+                batch["clips"][voice] = recording
+                batch["errors"].pop(voice, None)
+            except Exception as exc:
+                batch["errors"][voice] = diagnostics or [("Gemini", safe_gemini_error(exc))]
+
+    if not batch:
+        return
+    voices = dict.fromkeys([*selected, *batch["clips"], *batch["errors"]])
+    for voice in voices:
+        key_suffix = f"{script_id}_{voice}"
+        with st.container(border=True):
+            st.write(voice)
+            if voice in batch["clips"]:
+                data, duration = batch["clips"][voice]
+                st.audio(data, format="audio/wav")
+                st.caption(f"{duration:.1f} saniye")
+                st.download_button(
+                    "WAV indir", data, f"vortex360-{voice.lower()}.wav", "audio/wav",
+                    key=f"vortex_studio_download_{key_suffix}",
+                )
+                favorite = batch["favorite"] == voice
+                st.button(
+                    "★ Favori" if favorite else "Favori seç", disabled=favorite,
+                    key=f"vortex_studio_favorite_{key_suffix}",
+                    on_click=batch.__setitem__, args=("favorite", voice),
+                )
+            elif voice in batch["errors"]:
+                for route, detail in batch["errors"][voice]:
+                    st.error(f"{route}: {detail}")
+            else:
+                st.caption("Henüz kayıt yok.")
 
 def render_task_inbox(bot_roles, run_bot, make_client):
     st.header("📥 ChatGPT Görev Kutusu")
@@ -300,7 +346,6 @@ def render_task_inbox(bot_roles, run_bot, make_client):
         )
         st.session_state["vortex_task_script"] = SAMPLE_TEXT
         st.session_state.pop("vortex_task_audio", None)
-
     with st.form("vortex_task_inbox"):
         title = st.text_input("Görev başlığı", max_chars=200, key="vortex_task_title")
         brief = st.text_area("ChatGPT görev metni", max_chars=6000, key="vortex_task_brief")
@@ -308,7 +353,6 @@ def render_task_inbox(bot_roles, run_bot, make_client):
             "Robotlar", list(bot_roles), default=list(bot_roles), key="vortex_task_roles"
         )
         submitted = st.form_submit_button("Görevi çalıştır")
-
     if submitted:
         if not title.strip() or not brief.strip() or not selected:
             st.warning("Başlık, görev metni ve en az bir robot seçimi gerekli.")
@@ -327,14 +371,12 @@ def render_task_inbox(bot_roles, run_bot, make_client):
             except Exception:
                 st.error("Gemini bağlantısı kurulamadı.")
             st.session_state["vortex_task_results"] = (title, results)
-
     completed = st.session_state.get("vortex_task_results")
     if completed and completed[1]:
         st.subheader(completed[0])
         for role, output in completed[1].items():
             with st.expander(role):
                 st.text(output)
-
     script = st.text_area("Seslendirilecek Türkçe metin", max_chars=2500, key="vortex_task_script")
     voice = st.selectbox("Gemini sesi", TTS_VOICES, key="vortex_task_voice")
     if st.button("Hesaptaki ses modellerini kontrol et"):
@@ -345,7 +387,6 @@ def render_task_inbox(bot_roles, run_bot, make_client):
             st.session_state["vortex_task_voice_models"] = safe_gemini_error(exc)
     if st.session_state.get("vortex_task_voice_models"):
         st.text(st.session_state["vortex_task_voice_models"])
-
     if st.button("Ses örneği üret", disabled=not script.strip()):
         st.session_state.pop("vortex_task_audio", None)
         diagnostics = []
@@ -358,10 +399,8 @@ def render_task_inbox(bot_roles, run_bot, make_client):
             st.error("Gemini yanıtında kullanılabilir ses verisi bulunamadı.")
         except Exception as exc:
             st.error(safe_gemini_error(exc))
-
     for route, detail in st.session_state.get("vortex_task_voice_diagnostics", []):
         st.text(f"{route}: {detail}")
-
     audio = st.session_state.get("vortex_task_audio")
     if audio:
         data, duration = audio
@@ -370,5 +409,5 @@ def render_task_inbox(bot_roles, run_bot, make_client):
         voice_label = f"Ses: {recorded_voice} · " if recorded_voice else ""
         st.caption(f"{voice_label}Ölçülen süre: {duration:.1f} saniye")
         st.download_button("WAV indir", data, "vortex360-ses-ornegi.wav", "audio/wav")
-
+    render_voice_studio()
     render_manual_queue(bot_roles, run_bot, make_client)
