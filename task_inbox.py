@@ -42,6 +42,8 @@ def safe_gemini_error(exc):
         (("quota", "rate limit"), "Sağlayıcı kota veya istek sınırı bildirdi."),
         (("requested entity was not found",), "Sağlayıcı hedef kaynağı bulamadı; hangi kaynağın eksik olduğunu belirtmedi."),
     )
+    if status is None and isinstance(exc, ValueError):
+        return "Gemini yanıtında kullanılabilir ses verisi bulunamadı."
     parts = [f"HTTP {status}" if status else "HTTP kodu yok"]
     known_status = {"INVALID_ARGUMENT", "NOT_FOUND", "PERMISSION_DENIED", "UNAUTHENTICATED",
                     "RESOURCE_EXHAUSTED", "UNAVAILABLE", "FAILED_PRECONDITION", "INTERNAL"}
@@ -82,67 +84,39 @@ def create_narration(client, text, diagnostics=None):
             generation_config={"speech_config": [{"voice": "Orus"}]},
             store=False,
         )
+        audio = response.output_audio
+        if not audio or not audio.data:
+            raise ValueError("Ses servisi bir ses örneği döndürmedi.")
+        return narration_wav(
+            b64decode(audio.data, validate=True), audio.mime_type,
+            getattr(audio, "channels", None), getattr(audio, "sample_rate", None),
+        )
     except Exception as exc:
         if diagnostics is not None:
             diagnostics.append(("Gemini 3.1 Flash TTS · Interactions", safe_gemini_error(exc)))
-        if gemini_http_status(exc) not in (400, 404):
-            raise
-        try:
-            result = client.models.generate_content(
-                model="gemini-3.8-flash-lite-tts",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=types.SpeechConfig(
-                        voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Orus")
-                        )
-                    ),
-                ),
-            )
-        except Exception as exc:
-            if diagnostics is not None:
-                diagnostics.append(("Gemini 3.8 Flash-Lite TTS · GenerateContent", safe_gemini_error(exc)))
-            if gemini_http_status(exc) not in (400, 404):
-                raise
-            transcript = [{
-                "type": "user_input",
-                "content": [{
-                    "type": "text",
-                    "text": text,
-                    "annotations": [{
-                        "type": "speech_metadata",
-                        "style": "Natural standard Turkish, deep adult male documentary narration, "
-                                 "clear diction, short pauses, approximately 30 seconds",
-                    }],
-                }],
-            }]
-            try:
-                response = client.interactions.create(
-                    model="gemini-3.8-flash-lite-tts",
-                    input=transcript,
-                    response_format={"type": "audio"},
-                    generation_config={"speech_config": [{"voice": "Orus"}]},
-                    store=False,
-                )
-            except Exception as exc:
-                if diagnostics is not None:
-                    diagnostics.append(("Gemini 3.8 Flash-Lite TTS · Interactions", safe_gemini_error(exc)))
-                raise
-        else:
-            for part in result.parts or []:
-                audio = part.inline_data
-                if audio and audio.data and (audio.mime_type or "").lower().startswith("audio/"):
-                    return narration_wav(audio.data, audio.mime_type)
-            raise ValueError("Ses servisi bir ses örneği döndürmedi.")
 
-    audio = response.output_audio
-    if not audio or not audio.data:
+    try:
+        result = client.models.generate_content(
+            model="gemini-2.5-flash-preview-tts",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Orus")
+                    )
+                ),
+            ),
+        )
+        for part in result.parts or []:
+            audio = part.inline_data
+            if audio and audio.data and (audio.mime_type or "").lower().startswith("audio/"):
+                return narration_wav(audio.data, audio.mime_type)
         raise ValueError("Ses servisi bir ses örneği döndürmedi.")
-    return narration_wav(
-        b64decode(audio.data, validate=True), audio.mime_type,
-        getattr(audio, "channels", None), getattr(audio, "sample_rate", None),
-    )
+    except Exception as exc:
+        if diagnostics is not None:
+            diagnostics.append(("Gemini 2.5 Flash Preview TTS · GenerateContent", safe_gemini_error(exc)))
+        raise
 
 
 def narration_wav(data, mime_type, channels=None, sample_rate=None):
