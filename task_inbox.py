@@ -1,9 +1,10 @@
 from base64 import b64decode
+from hashlib import sha256
 from io import BytesIO
+import json
 import wave
 
 import streamlit as st
-from google.genai import errors
 
 
 SAMPLE_TITLE = "Kara Deliğe Düşersen Ne Olur?"
@@ -41,6 +42,91 @@ def create_narration(client, text):
             output.setparams((channels, 2, sample_rate, 0, "NONE", "not compressed"))
             output.writeframes(data)
         return buffer.getvalue(), len(data) / (2 * channels * sample_rate)
+
+
+def parse_task_packet(raw):
+    if len(raw) > 40000:
+        raise ValueError("Görev paketi çok büyük.")
+    packet = json.loads(raw)
+    if not isinstance(packet, dict) or set(packet) != {"title", "brief"}:
+        raise ValueError("Paket yalnızca title ve brief alanlarını içermeli.")
+    title, brief = packet["title"], packet["brief"]
+    if not isinstance(title, str) or not isinstance(brief, str):
+        raise ValueError("Görev başlığı ve açıklaması metin olmalı.")
+    title, brief = title.strip(), brief.strip()
+    if not (0 < len(title) <= 200 and 0 < len(brief) <= 6000):
+        raise ValueError("Görev başlığı veya açıklaması boş ya da çok uzun.")
+    return title, brief
+
+
+def render_manual_queue(bot_roles, run_bot, make_client):
+    st.subheader("Panelden çalıştırılan görevler")
+    st.caption("ChatGPT görev paketini buraya yapıştır. Görevler bu oturumda tutulur ve düğmeyle çalıştırılır.")
+    jobs = st.session_state.setdefault("vortex_task_manual_jobs", {})
+    with st.form("vortex_task_manual_packet"):
+        raw = st.text_area("Görev paketi (JSON)", max_chars=40000)
+        roles = st.multiselect("Kuyruk robotları", list(bot_roles), default=list(bot_roles))
+        add = st.form_submit_button("Oturum kuyruğuna ekle")
+
+    if add:
+        try:
+            title, brief = parse_task_packet(raw)
+            if not roles:
+                raise ValueError("En az bir robot seç.")
+        except (ValueError, TypeError):
+            st.warning('Geçerli bir {"title": "...", "brief": "..."} paketi ve robot seçimi gerekli.')
+        else:
+            roles = [name for name in bot_roles if name in roles]
+            encoded = json.dumps([title, brief, roles], ensure_ascii=False)
+            task_id = sha256(encoded.encode()).hexdigest()
+            if task_id in jobs:
+                st.info("Bu görev zaten oturum kuyruğunda.")
+            elif len(jobs) >= 20:
+                st.warning("Bu oturumun görev sınırına ulaşıldı. Sonuçları indirin.")
+            else:
+                jobs[task_id] = {
+                    "title": title, "brief": brief, "roles": roles,
+                    "outputs": {}, "failed": [], "status": "Bekliyor",
+                }
+
+    for task_id, job in jobs.items():
+        with st.expander(f"{job['title']} · {job['status']}"):
+            st.text(job["brief"])
+            ready = job["status"] in {"Bekliyor", "Başarısız", "Kısmen tamamlandı"}
+            label = "Kuyruk görevini çalıştır" if job["status"] == "Bekliyor" else "Başarısız robotları yeniden çalıştır"
+            if ready and st.button(label, key=f"vortex_task_run_{task_id}"):
+                job["status"] = "Çalışıyor"
+                pending = [role for role in job["roles"] if role not in job["outputs"]]
+                try:
+                    with st.spinner("Görev çalışıyor…"):
+                        client = make_client()
+                        for role in pending:
+                            try:
+                                result = run_bot(client, bot_roles[role], f"{job['title']}\n\n{job['brief']}")
+                                job["outputs"][role] = result
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+                finally:
+                    job["failed"] = [role for role in pending if role not in job["outputs"]]
+                    job["status"] = (
+                        "Tamamlandı" if not job["failed"] else
+                        "Kısmen tamamlandı" if job["outputs"] else "Başarısız"
+                    )
+                st.rerun()
+            for role, result in job["outputs"].items():
+                st.write(role)
+                st.text(result)
+            if job["failed"]:
+                st.warning("Yanıt alınamayan robotlar: " + ", ".join(job["failed"]))
+
+    if jobs:
+        st.download_button(
+            "Oturum görevlerini indir",
+            json.dumps(list(jobs.values()), ensure_ascii=False, indent=2),
+            "vortex360-gorevler.json", "application/json",
+        )
 
 
 def render_task_inbox(bot_roles, run_bot, make_client):
@@ -94,9 +180,11 @@ def render_task_inbox(bot_roles, run_bot, make_client):
         try:
             with st.spinner("Ses örneği hazırlanıyor…"):
                 st.session_state["vortex_task_audio"] = create_narration(make_client(), script)
-        except errors.APIError as exc:
-            code = exc.code
-            details = {
+        except ValueError:
+            st.error("Gemini yanıtında kullanılabilir ses verisi bulunamadı.")
+        except Exception as exc:
+            status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+            messages = {
                 400: "Gemini ses isteğini geçersiz buldu.",
                 401: "Gemini kimlik doğrulaması başarısız.",
                 403: "Gemini projesinin bu ses modeline erişimi yok.",
@@ -104,11 +192,8 @@ def render_task_inbox(bot_roles, run_bot, make_client):
                 429: "Gemini ses kotası veya istek sınırı aşıldı.",
                 503: "Gemini ses hizmeti geçici olarak kullanılamıyor.",
             }
-            st.error(details.get(code, "Gemini ses isteği başarısız."))
-        except ValueError:
-            st.error("Gemini yanıtında kullanılabilir ses verisi bulunamadı.")
-        except Exception:
-            st.error("Ses üretimi tamamlanamadı.")
+            detail = messages.get(status, "Ses üretimi tamamlanamadı.")
+            st.error(f"{detail} (HTTP {status})" if type(status) is int and 400 <= status <= 599 else detail)
 
     audio = st.session_state.get("vortex_task_audio")
     if audio:
@@ -116,3 +201,5 @@ def render_task_inbox(bot_roles, run_bot, make_client):
         st.audio(data, format="audio/wav")
         st.caption(f"Ölçülen süre: {duration:.1f} saniye")
         st.download_button("WAV indir", data, "vortex360-ses-ornegi.wav", "audio/wav")
+
+    render_manual_queue(bot_roles, run_bot, make_client)
