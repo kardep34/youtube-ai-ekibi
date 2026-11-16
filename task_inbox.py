@@ -2,7 +2,7 @@ from io import BytesIO
 import wave
 
 import streamlit as st
-from google.genai import types
+from google.genai import errors, types
 
 
 SAMPLE_TITLE = "Kara Deliğe Düşersen Ne Olur?"
@@ -11,7 +11,7 @@ SAMPLE_TEXT = "Bir kara deliğe düşseydin ne olurdu? Yaklaştıkça, kara deli
 
 def create_narration(client, text):
     response = client.models.generate_content(
-        model="gemini-2.5-flash-preview-tts",
+        model="gemini-3.1-flash-tts-preview",
         contents="Standart Türkiye Türkçesiyle, tok ve doğal bir yetişkin erkek belgesel sesi kullan. Sakin konuş ve kısa, doğal duraklar ver. "
         "Yalnızca aşağıdaki metni seslendir, yaklaşık 30 saniye hedefle.\n\n" + text,
         config=types.GenerateContentConfig(
@@ -86,8 +86,21 @@ def render_task_inbox(bot_roles, run_bot, make_client):
         try:
             with st.spinner("Ses örneği hazırlanıyor…"):
                 st.session_state["vortex_task_audio"] = create_narration(make_client(), script)
+        except errors.APIError as exc:
+            code = exc.code
+            details = {
+                400: "Gemini ses isteğini geçersiz buldu.",
+                401: "Gemini kimlik doğrulaması başarısız.",
+                403: "Gemini projesinin bu ses modeline erişimi yok.",
+                404: "Ses modeli bu Gemini projesinde bulunamadı.",
+                429: "Gemini ses kotası veya istek sınırı aşıldı.",
+                503: "Gemini ses hizmeti geçici olarak kullanılamıyor.",
+            }
+            st.error(details.get(code, "Gemini ses isteği başarısız."))
+        except ValueError:
+            st.error("Gemini yanıtında kullanılabilir ses verisi bulunamadı.")
         except Exception:
-            st.error("Ses üretilemedi. Gemini ses modeli erişimini ve kotasını kontrol edin.")
+            st.error("Ses üretimi tamamlanamadı.")
 
     audio = st.session_state.get("vortex_task_audio")
     if audio:
