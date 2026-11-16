@@ -11,6 +11,8 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from task_inbox import render_task_inbox
+
 st.set_page_config(page_title='VORTEX 360 | Yapay Zeka Ekibi', page_icon='🌀')
 st.title('🌀 VORTEX 360')
 st.caption('Bilinmeyenin Peşinde | İçerik ve YouTube yönetim paneli')
@@ -90,7 +92,9 @@ if not st.session_state.get('giris', False):
     st.stop()
 
 if st.button('Çıkış Yap'):
-    for key in ['giris', 'yt_credentials', 'yt_auth_url', 'yt_oauth_success']:
+    for key in list(st.session_state):
+        if key not in ['giris', 'yt_credentials', 'yt_auth_url', 'yt_oauth_success'] and not key.startswith('vortex_task_'):
+            continue
         st.session_state.pop(key, None)
     st.rerun()
 
@@ -115,6 +119,9 @@ def bot_calistir(client, gorev, konu):
             else:
                 raise
 
+
+render_task_inbox(botlar, bot_calistir, lambda: genai.Client(api_key=st.secrets['GEMINI_API_KEY']))
+st.divider()
 
 st.header('🤖 Beş Bot Tek Panelde')
 konu = st.text_area('Video konusu', value='Mariana Çukuru: Okyanusun en derin noktasında neler var?')
