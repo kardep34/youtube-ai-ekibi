@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from google.genai.errors import ClientError
 from streamlit.testing.v1 import AppTest
 
 from task_inbox import create_narration, parse_task_packet
@@ -73,11 +74,12 @@ def test_legacy_tts_request_and_safe_errors():
     client.interactions.create.side_effect = error(
         404, "NOT_FOUND", "Model not found for API version, secret example-not-for-display"
     )
-    client.models.generate_content.side_effect = error(
-        400, "INVALID_ARGUMENT", "Invalid JSON payload received; authorization: hidden"
-    )
+    client.models.generate_content.side_effect = ClientError(400, {"error": {
+        "status": "INVALID_ARGUMENT",
+        "message": 'Invalid JSON payload received. Unknown name "speechConfig"; authorization: hidden',
+    }})
     diagnostics = []
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ClientError):
         create_narration(client, "Türkçe örnek.", diagnostics)
     request = client.models.generate_content.call_args.kwargs
     assert request["model"] == "gemini-2.5-flash-preview-tts"
@@ -87,4 +89,5 @@ def test_legacy_tts_request_and_safe_errors():
     report = str(diagnostics)
     assert "HTTP 404" in report and "HTTP 400" in report
     assert "NOT_FOUND" in report and "INVALID_ARGUMENT" in report
+    assert "Reddedilen alan: speechConfig" in report
     assert "example-not-for-display" not in report and "authorization" not in report

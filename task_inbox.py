@@ -2,6 +2,7 @@ from base64 import b64decode
 from hashlib import sha256
 from io import BytesIO
 import json
+import re
 import wave
 
 import streamlit as st
@@ -23,6 +24,8 @@ def safe_gemini_error(exc):
     body = getattr(exc, "body", None)
     if not isinstance(body, dict):
         body = getattr(exc, "response_json", None)
+    if not isinstance(body, dict):
+        body = getattr(exc, "details", None)
     if not isinstance(body, dict):
         body = {}
     provider = body.get("error", body)
@@ -47,14 +50,29 @@ def safe_gemini_error(exc):
     parts = [f"HTTP {status}" if status else "HTTP kodu yok"]
     known_status = {"INVALID_ARGUMENT", "NOT_FOUND", "PERMISSION_DENIED", "UNAUTHENTICATED",
                     "RESOURCE_EXHAUSTED", "UNAVAILABLE", "FAILED_PRECONDITION", "INTERNAL"}
-    if provider.get("status") in known_status:
-        parts.append(provider["status"])
+    provider_status = provider.get("status") or getattr(exc, "status", None)
+    if isinstance(provider_status, str) and provider_status in known_status:
+        parts.append(provider_status)
     reasons = {"API_KEY_INVALID", "API_KEY_SERVICE_BLOCKED", "SERVICE_DISABLED",
                "BILLING_DISABLED", "RATE_LIMIT_EXCEEDED", "CONSUMER_INVALID",
                "ACCESS_TOKEN_SCOPE_INSUFFICIENT", "LOCATION_POLICY_VIOLATED"}
     for detail in provider.get("details") or []:
         if isinstance(detail, dict) and detail.get("reason") in reasons:
             parts.append(detail["reason"])
+    if status == 400:
+        fields = {
+            "contents": "contents",
+            "generationconfig": "generationConfig",
+            "responsemodalities": "responseModalities",
+            "speechconfig": "speechConfig",
+            "voiceconfig": "voiceConfig",
+            "prebuiltvoiceconfig": "prebuiltVoiceConfig",
+            "voicename": "voiceName",
+        }
+        match = re.search(r'unknown (?:name|field)\s+["\']([a-z_]+)["\']', message)
+        field = fields.get(match.group(1).replace("_", "")) if match else None
+        if field:
+            parts.append(f"Reddedilen alan: {field}")
     parts.append(next((description for phrases, description in signals
                        if any(phrase in message for phrase in phrases)),
                       "Sağlayıcıdan gösterilebilir özel hata nedeni alınamadı."))
