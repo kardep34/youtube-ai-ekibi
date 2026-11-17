@@ -3,7 +3,9 @@ from hashlib import sha256
 from importlib.metadata import version
 from io import BytesIO
 import json
+import logging
 import re
+from time import monotonic
 import wave
 
 import streamlit as st
@@ -29,7 +31,11 @@ TTS_VOICES = (
     "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
 )
 VOICE_API_VERSION = "v1beta"
-VOICE_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts")
+PRIMARY_VOICE_MODEL = "gemini-3.1-flash-tts-preview"
+FALLBACK_VOICE_MODEL = "gemini-3.8-flash-lite-tts"
+LEGACY_VOICE_MODEL = "gemini-2.5-flash-preview-tts"
+VOICE_MODELS = (PRIMARY_VOICE_MODEL, FALLBACK_VOICE_MODEL, LEGACY_VOICE_MODEL)
+VOICE_LOG = logging.getLogger(__name__)
 
 
 def gemini_http_status(exc):
@@ -64,6 +70,10 @@ def safe_gemini_error(exc):
         (("quota", "rate limit"), "Sağlayıcı kota veya istek sınırı bildirdi."),
         (("requested entity was not found",), "Sağlayıcı hedef kaynağı bulamadı; hangi kaynağın eksik olduğunu belirtmedi."),
     )
+    if status is None and (
+        isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower()
+    ):
+        return "Zaman aşımı · HTTP yanıtı alınamadı."
     if status is None and isinstance(exc, ValueError):
         return "Gemini yanıtında kullanılabilir ses verisi bulunamadı."
     parts = [f"HTTP {status}" if status else "HTTP kodu yok"]
@@ -99,7 +109,11 @@ def voice_client():
     return genai.Client(
         api_key=st.secrets["GEMINI_API_KEY"],
         vertexai=False,
-        http_options=types.HttpOptions(api_version=VOICE_API_VERSION),
+        http_options=types.HttpOptions(
+            api_version=VOICE_API_VERSION,
+            timeout=20000,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        ),
     )
 
 
@@ -138,27 +152,50 @@ def create_narration(client, text, diagnostics=None, *, voice="Orus"):
     if voice not in TTS_VOICES:
         raise ValueError("Desteklenmeyen ses seçimi.")
     prompt = f"{VOICE_DIRECTION}\n\nSESLENDİRİLECEK METİN:\n{text}"
-    try:
-        response = client.interactions.create(
-            model=VOICE_MODELS[0], input=prompt, response_format={"type": "audio"},
-            generation_config={"speech_config": [{"voice": voice}]}, store=False,
-        )
-        audio = response.output_audio
-        if not audio or not audio.data:
-            raise ValueError("Ses servisi bir ses örneği döndürmedi.")
-        return narration_wav(
-            b64decode(audio.data, validate=True), audio.mime_type,
-            getattr(audio, "channels", None), getattr(audio, "sample_rate", None),
-        )
-    except Exception as exc:
-        if diagnostics is not None:
-            diagnostics.append(("Gemini 3.1 Flash TTS · Interactions", safe_gemini_error(exc)))
+    timeout_seconds = min(100, max(22, 12 + len(text) // 12))
+    styled_input = [{
+        "type": "user_input",
+        "content": [{
+            "type": "text",
+            "text": text,
+            "annotations": [{"type": "speech_metadata", "style": VOICE_DIRECTION}],
+        }],
+    }]
+    for model, model_input in (
+        (PRIMARY_VOICE_MODEL, prompt),
+        (FALLBACK_VOICE_MODEL, styled_input),
+    ):
+        started = monotonic()
+        try:
+            response = client.interactions.create(
+                model=model, input=model_input, response_format={"type": "audio"},
+                generation_config={"speech_config": [{"voice": voice}]},
+                store=False, timeout=timeout_seconds,
+            )
+            audio = response.output_audio
+            if not audio or not audio.data:
+                raise ValueError("Ses servisi bir ses örneği döndürmedi.")
+            recording = narration_wav(
+                b64decode(audio.data, validate=True), audio.mime_type,
+                getattr(audio, "channels", None), getattr(audio, "sample_rate", None),
+            )
+            VOICE_LOG.info("Gemini TTS %s · %s · WAV %.1f s", model, voice, recording[1])
+            return recording
+        except Exception as exc:
+            detail = safe_gemini_error(exc)
+            VOICE_LOG.warning(
+                "Gemini TTS %s · %s · %.1f s · %s",
+                model, voice, monotonic() - started, detail,
+            )
+            if diagnostics is not None:
+                diagnostics.append((f"{model} · Interactions", detail))
+    started = monotonic()
     try:
         result = client.models.generate_content(
-            model=VOICE_MODELS[1], contents=prompt,
+            model=LEGACY_VOICE_MODEL, contents=prompt,
             config=types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
-                http_options=types.HttpOptions(extra_body={
+                http_options=types.HttpOptions(timeout=timeout_seconds * 1000, extra_body={
                     "generationConfig": {"speechConfig": {
                         "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}
                     }}
@@ -168,11 +205,18 @@ def create_narration(client, text, diagnostics=None, *, voice="Orus"):
         for part in result.parts or []:
             audio = part.inline_data
             if audio and audio.data and (audio.mime_type or "").lower().startswith("audio/"):
-                return narration_wav(audio.data, audio.mime_type)
+                recording = narration_wav(audio.data, audio.mime_type)
+                VOICE_LOG.info("Gemini TTS %s · %s · WAV %.1f s", LEGACY_VOICE_MODEL, voice, recording[1])
+                return recording
         raise ValueError("Ses servisi bir ses örneği döndürmedi.")
     except Exception as exc:
+        detail = safe_gemini_error(exc)
+        VOICE_LOG.warning(
+            "Gemini TTS %s · %s · %.1f s · %s",
+            LEGACY_VOICE_MODEL, voice, monotonic() - started, detail,
+        )
         if diagnostics is not None:
-            diagnostics.append(("Gemini 2.5 Flash Preview TTS · GenerateContent", safe_gemini_error(exc)))
+            diagnostics.append((f"{LEGACY_VOICE_MODEL} · GenerateContent", detail))
         raise
 
 

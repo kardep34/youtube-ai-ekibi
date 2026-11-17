@@ -93,3 +93,25 @@ def test_legacy_tts_request_and_safe_errors():
     assert "NOT_FOUND" in report and "INVALID_ARGUMENT" in report
     assert "Reddedilen alan: speechConfig" in report
     assert "example-not-for-display" not in report and "authorization" not in report
+
+
+def test_algenib_timeout_falls_back_to_annotated_lite_tts():
+    from base64 import b64encode
+
+    client = Mock()
+    response = SimpleNamespace(output_audio=SimpleNamespace(
+        data=b64encode(b"\x01\x00" * 24000).decode(), mime_type="audio/l16"
+    ))
+    client.interactions.create.side_effect = [TimeoutError("private text"), response]
+    diagnostics = []
+    wav, duration = create_narration(client, "Uzayın derinliklerindesin.", diagnostics, voice="Algenib")
+    assert wav.startswith(b"RIFF") and duration == 1
+    first, second = [call.kwargs for call in client.interactions.create.call_args_list]
+    assert first["timeout"] == second["timeout"] == 22
+    assert second["model"] == "gemini-3.8-flash-lite-tts"
+    assert second["generation_config"]["speech_config"] == [{"voice": "Algenib"}]
+    part = second["input"][0]["content"][0]
+    assert part["text"] == "Uzayın derinliklerindesin."
+    assert part["annotations"][0]["type"] == "speech_metadata"
+    assert diagnostics[0][1] == "Zaman aşımı · HTTP yanıtı alınamadı."
+    client.models.generate_content.assert_not_called()
