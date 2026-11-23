@@ -85,7 +85,7 @@ if code and not st.session_state.get('yt_credentials'):
 if not st.session_state.get('giris', False):
     password = st.text_input('Panel şifresi', type='password')
     if st.button('Giriş Yap'):
-        if hmac.compare_digest(password, st.secrets['PANEL_PASSWORD']):
+        if hmac.compare_digest(password.encode('utf-8'), st.secrets['PANEL_PASSWORD'].encode('utf-8')):
             st.session_state['giris'] = True
             st.rerun()
         st.error('Şifre yanlış.')
