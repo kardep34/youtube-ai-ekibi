@@ -14,6 +14,32 @@ class FreeOnlyBlocked(RuntimeError):
     pass
 
 
+def checked_response(response, stage):
+    if response.status_code == 200:
+        return response.json()
+    labels = {
+        "SERVICE_DISABLED": "İlgili Google API projesinde etkin değil.",
+        "ACCESS_TOKEN_SCOPE_INSUFFICIENT": "Google okuma izni eksik; bağlantıyı yeniden kurun.",
+        "IAM_PERMISSION_DENIED": "Bu Google hesabının proje okuma yetkisi yok.",
+        "PERMISSION_DENIED": "Google proje erişimini reddetti.",
+        "API_KEY_INVALID": "Gemini anahtarı geçersiz.",
+        "CONSUMER_INVALID": "Google API tüketici projesi geçersiz.",
+    }
+    reason = "Google erişim kontrolünü tamamlayamadı."
+    try:
+        body = response.json().get("error", {})
+        for detail in body.get("details", []):
+            code = detail.get("reason") if isinstance(detail, dict) else None
+            if code in labels:
+                reason = labels[code]
+                break
+    except Exception:
+        pass
+    status = response.status_code
+    status = status if type(status) is int and 100 <= status <= 599 else "?"
+    raise FreeOnlyBlocked(f"{stage} · HTTP {status} · {reason} Üretim kapalı; ödeme eklemeyin.")
+
+
 def verify_unbilled_key(api_key, credentials, session_factory=AuthorizedSession):
     """Never generate, change billing, cache authorization, or return key material.
 
@@ -32,9 +58,7 @@ def verify_unbilled_key(api_key, credentials, session_factory=AuthorizedSession)
                 "https://apikeys.googleapis.com/v2/keys:lookupKey",
                 params={"keyString": api_key}, timeout=10, allow_redirects=False,
             )
-            if lookup.status_code != 200:
-                raise ValueError("lookup")
-            key = lookup.json()
+            key = checked_response(lookup, "API Keys API: anahtarın projesi")
             parent = key.get("parent", "")
             if not re.fullmatch(r"projects/[0-9]+/locations/global", parent):
                 raise ValueError("project")
@@ -45,9 +69,7 @@ def verify_unbilled_key(api_key, credentials, session_factory=AuthorizedSession)
                 f"https://cloudbilling.googleapis.com/v1/projects/{project}/billingInfo",
                 timeout=10, allow_redirects=False,
             )
-            if response.status_code != 200:
-                raise ValueError("billing")
-            info = response.json()
+            info = checked_response(response, "Cloud Billing API: faturalandırma")
             # Proto JSON may omit a false boolean and an empty string. Only a
             # successful, identified BillingInfo resource permits those defaults.
             project_id = info.get("projectId", "")
