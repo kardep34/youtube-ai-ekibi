@@ -9,7 +9,8 @@ formatları destekler. Hiçbir ödeme, abonelik, kredi veya ücretli API yedeği
 - Sabit uzunluk isteyen senaryo talimatları var. Yeni stüdyonun sahne planında süre
   her projeye ve gerçek anlatım kaydına göre belirlenir.
 - Gemini API anahtarının olması ücretsiz faturalandırma durumunu kanıtlamıyor.
-  Mevcut uygulamada bunu doğrulayacak hesap/billing erişimi yok.
+  Yeni onarım, ayrıca verilen salt okunur Google izniyle anahtarın gerçek
+  projesini ve Cloud Billing durumunu her üretim öncesinde doğrular.
 - Ücretli olabilecek model yedekleri ve tekrar denemeleri vardı.
 - Oturum kuyruğu kalıcı arşiv değil; oturum kapanınca çıktılar kaybolabilir.
 - Mevcut sürümde kurgu, zamanlı altyazı ve MP4 render aşaması yoktu.
@@ -17,9 +18,11 @@ formatları destekler. Hiçbir ödeme, abonelik, kredi veya ücretli API yedeği
 
 ## Bu değişiklik
 
-- Gemini metin ve ses üretim yolları ağ çağrısından **önce** durur. Beş botun
-  arayüzü ve eski kodu korunur ancak bulut üretimi çalışmaz. Ücretsiz kota kontrolü
-  yaptığını iddia eden, doğrulanamayan bir onay kutusu eklenmez.
+- Gemini metin ve ses üretimi, salt okunur proje doğrulaması olmadan durur.
+  Anahtarın projesinde bağlı faturalandırma hesabı olmadığı doğrulandığında açılır.
+  Bu kontrol model erişimi, bölgesel uygunluk veya ücretsiz kota garantisi vermez.
+  Ödeme hesabı bağlıysa (pasif olsa bile), yetki eksikse veya Google yanıtı
+  belirsizse üretim kapalı kalır. Ayrıntılar: REPAIR.md.
 - NASA Image and Video Library ve Wikimedia Commons için anahtarsız, salt-okunur
   katalog araması eklenir. Eser adı, üretici, kaynak ve lisans bilgileri kaydedilir.
   Sonuç seçimi bir hak temizleme işlemi değildir; dosya sayfası incelenmelidir.
@@ -27,6 +30,7 @@ formatları destekler. Hiçbir ödeme, abonelik, kredi veya ücretli API yedeği
   sayfasında 24 Kasım 2026 kontrolünde yeni anahtar verilmesinin durduğu yazıyordu.
   Bu yüzden çalışan otomatik API entegrasyonu olarak gösterilmez.
 - Shotcut ve Audacity **indirme bağlantılarıdır**; ChatGPT eklentisi değillerdir.
+- Panelde üretilen son Algenib veya diğer ses, yeniden yüklemeden kurguya aktarılır.
 - Her projede farklı ses kaydı yüklenebilir; dinleme ve onay alanı eklenir.
   Mekanik yerel ses üretimi kalite tercihi nedeniyle bu sürüme dahil edilmez.
 - Kullanıcı metni/senaryoyu yapıştırır; görsel ve klipleri dosya olarak yükler.
@@ -40,7 +44,9 @@ formatları destekler. Hiçbir ödeme, abonelik, kredi veya ücretli API yedeği
 
 Streamlit Community Cloud, `requirements.txt` ile Python paketlerini ve
 `packages.txt` ile ffmpeg, fonts-dejavu-core paketlerini yükler.
-Yeni secret veya API anahtarı gerekmez. Var olan panel şifresi korunur.
+Mevcut Gemini anahtarı ve Google OAuth istemcisi kullanılır. Üretim için ayrı
+salt okunur Google izni gerekir; ödeme veya yeni ücretli hizmet gerekmez.
+Var olan panel şifresi korunur.
 
 Yerelde (Debian/Ubuntu):
 
@@ -85,7 +91,7 @@ değildir. Sırf ücretsiz olması düşük kaliteyi kabul etme nedeni değildir
 ## Sonraki geliştirmeler
 
 Ücretsiz yerel konuşma tanıma (donanıma bağlı), kelime hizalama, sahne düzenleyici,
-ortak onaylı senaryoya dayanan bot iş akışı ve çıktı kalite raporu ayrı çalışmalar
+kalıcı proje arşivi ve ayrıntılı çıktı kalite raporu ayrı çalışmalar
 olarak kalır. Bu sürüm bu özellikleri tamamlanmış gibi göstermez.
 
 ## Resmî kaynaklar
