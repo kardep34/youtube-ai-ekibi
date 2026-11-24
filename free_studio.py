@@ -172,6 +172,13 @@ def render_free_studio():
     uploads = st.file_uploader("Sahne dosyaları", type=["png", "jpg", "jpeg", "webp", "mp4", "mov", "webm"],
                                accept_multiple_files=True, key="vortex_free_media")
     narration = st.file_uploader("Anlatım sesi", type=["wav", "mp3", "m4a"], key="vortex_free_narration")
+    generated = st.session_state.get("vortex_task_audio")
+    if generated and st.checkbox("Panelde üretilen son ses kaydını kullan", key="vortex_free_use_generated"):
+        narration = BytesIO(generated[0])
+        narration.name = "panel-anlatim.wav"
+        voice = st.session_state.get("vortex_task_audio_voice", "")
+        st.caption(f"Panelden aktarıldı · {voice} · {generated[1]:.1f} saniye. İndirip yeniden yüklemeniz gerekmez.")
+
     music = st.file_uploader("Kullanım hakkınız olan müzik (isteğe bağlı)", type=["wav", "mp3", "m4a"], key="vortex_free_music")
     if narration is not None:
         st.audio(narration.getvalue())
