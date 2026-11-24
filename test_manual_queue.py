@@ -9,6 +9,13 @@ from streamlit.testing.v1 import AppTest
 from task_inbox import create_narration, parse_task_packet
 
 
+@pytest.fixture(autouse=True)
+def legacy_provider_mocks_only():
+    """Legacy provider routing is tested under mocks; production remains blocked."""
+    with patch('free_policy.require_free_generation'), patch('task_inbox.require_free_generation'):
+        yield
+
+
 def button(at, label):
     return next(b for b in at.button if b.label == label)
 
@@ -115,3 +122,4 @@ def test_algenib_timeout_falls_back_to_annotated_lite_tts():
     assert part["annotations"][0]["type"] == "speech_metadata"
     assert diagnostics[0][1] == "Zaman aşımı · HTTP yanıtı alınamadı."
     client.models.generate_content.assert_not_called()
+

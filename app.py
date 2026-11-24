@@ -12,6 +12,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from task_inbox import render_task_inbox
+from free_policy import require_free_generation
+from free_studio import render_free_studio
 
 st.set_page_config(page_title='VORTEX 360 | Yapay Zeka Ekibi', page_icon='🌀')
 st.title('🌀 VORTEX 360')
@@ -93,14 +95,14 @@ if not st.session_state.get('giris', False):
 
 if st.button('Çıkış Yap'):
     for key in list(st.session_state):
-        if key not in ['giris', 'yt_credentials', 'yt_auth_url', 'yt_oauth_success'] and not key.startswith('vortex_task_'):
+        if key not in ['giris', 'yt_credentials', 'yt_auth_url', 'yt_oauth_success'] and not key.startswith(('vortex_task_', 'vortex_free_', 'vortex_voice_')):
             continue
         st.session_state.pop(key, None)
     st.rerun()
 
 botlar = {
     '💡 Fikir Üretici': '10 özgün YouTube video fikri üret. Bilimsel iddiaları doğrulanması gerekenler olarak işaretle.',
-    '✍️ Senaryo Yazarı': '6-8 dakikalık uzun video senaryosu ve 3 farklı 30-45 saniyelik Shorts senaryosu yaz.',
+    '✍️ Senaryo Yazarı': 'Ortak görevdeki konu, hedef süre, format ve onaylı anlatıma göre senaryo hazırla. Süre belirtilmemişse tahminini açıkça belirt; sabit uzunluk dayatma.',
     '🎯 Başlık Uzmanı': '10 dikkat çekici ama yanıltıcı olmayan başlık öner.',
     '📝 Açıklama Uzmanı': 'YouTube açıklaması, bölüm zamanları için taslak, etiketler ve hashtagler üret.',
     '🎨 Kanal Tasarımcısı': 'VORTEX 360 için siyah, mor, elektrik mavisi görsel tasarım ve küçük resim önerileri üret.',
@@ -108,6 +110,7 @@ botlar = {
 
 
 def bot_calistir(client, gorev, konu):
+    require_free_generation()
     prompt = f'Türkçe yanıt ver. Kanal VORTEX 360, slogan Bilinmeyenin Peşinde.\nGörev: {gorev}\nKonu: {konu}'
     for attempt in range(3):
         try:
@@ -120,7 +123,14 @@ def bot_calistir(client, gorev, konu):
                 raise
 
 
-render_task_inbox(botlar, bot_calistir, lambda: genai.Client(api_key=st.secrets['GEMINI_API_KEY']))
+def make_generation_client():
+    require_free_generation()
+    return genai.Client(api_key=st.secrets['GEMINI_API_KEY'])
+
+
+render_free_studio()
+st.divider()
+render_task_inbox(botlar, bot_calistir, make_generation_client)
 st.divider()
 
 st.header('🤖 Beş Bot Tek Panelde')
@@ -134,7 +144,7 @@ if run_one or run_all:
         st.warning('Önce bir konu gir.')
     else:
         try:
-            client = genai.Client(api_key=st.secrets['GEMINI_API_KEY'])
+            client = make_generation_client()
             selected = botlar.items() if run_all else [(secim, botlar[secim])]
             output = ['# VORTEX 360 İçerik Paketi', f'Konu: {konu}']
             for name, task in selected:
@@ -205,7 +215,7 @@ else:
             st.session_state.pop('yt_credentials', None)
             st.rerun()
 
-st.caption('Not: Bu panel henüz video dosyası üretmez, YouTube kanal adını veya kapağını otomatik değiştirmez. OAuth oturumu geçicidir.')
+st.caption('Ücretsiz stüdyo yüklenen medyadan MP4 oluşturur. YouTube OAuth oturumu geçicidir.')
 st.divider()
 st.header("📤 Botların Hazırladığı Videoyu YouTube'a Yükle")
 
@@ -272,3 +282,4 @@ if st.session_state.get("aktarilan_icerik"):
         height=250
     )
     
+

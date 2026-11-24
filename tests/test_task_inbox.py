@@ -3,6 +3,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import wave
+from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -10,12 +11,19 @@ from streamlit.testing.v1 import AppTest
 from task_inbox import create_narration, SAMPLE_TEXT
 
 
+@pytest.fixture(autouse=True)
+def legacy_provider_mocks_only():
+    """Exercise retained legacy behavior only under mocked clients, never production policy."""
+    with patch('free_policy.require_free_generation'), patch('task_inbox.require_free_generation'):
+        yield
+
+
 def button(at, label):
     return next(b for b in at.button if b.label == label)
 
 
 def app():
-    at = AppTest.from_file('../app.py')
+    at = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py'))
     at.secrets['PANEL_PASSWORD'] = 'test-password'
     at.secrets['GEMINI_API_KEY'] = 'test-key'
     at.session_state['giris'] = True
@@ -51,7 +59,7 @@ def test_missing_audio(audio):
 
 
 def test_login_gate():
-    at = AppTest.from_file('../app.py').run()
+    at = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py')).run()
     assert not at.exception
     assert [x.label for x in at.text_input] == ['Panel şifresi']
     assert not at.header
@@ -110,3 +118,4 @@ def test_audio_success_failure_and_logout():
     assert not at.exception
     assert 'vortex_task_script' not in at.session_state
     assert 'giris' not in at.session_state
+

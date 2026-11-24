@@ -1,22 +1,32 @@
-# Verification
+# Verification — free production workspace
 
-The supplied vortex-task-inbox-1.patch was applied without conflicts on top of
-main at 22519fe. No existing bot, OAuth, content transfer or YouTube upload code
-was removed. The task inbox is inside the existing login gate.
-
-Run the regression suite locally:
+Validated locally with Python 3.12, Streamlit 1.67.0, google-genai 3.6.1 and FFmpeg.
 
 ```sh
 python -m pip install -r requirements.txt pytest
 python -m pytest -q
-python -m compileall -q app.py task_inbox.py tests
+python -m compileall -q app.py task_inbox.py free_policy.py free_media.py free_render.py free_studio.py tests
 ```
 
-Result: 9 tests passed with Python 3.12, Streamlit 1.67.0 and google-genai 3.3.0.
-Coverage includes WAV format/duration, missing audio, login gate, sample task,
-required fields, partial bot failure, existing five-bot content package and
-transfer, audio success/failure, and task state cleanup on logout.
+Result: **36 tests passed**. Syntax checks and diff whitespace checks passed.
 
-Gemini responses are mocked. Real TTS access, quota and speech quality were not
-tested. No YouTube credentials were used, no YouTube API calls were made, and
-nothing was deployed or merged into main.
+Coverage includes the existing task queue and WAV conversion, login gate,
+cloud generation blocked before creating a client, production speech blocked
+before any provider request, project validation, variable-duration common
+briefs, source metadata and attribution, duplicate catalog widgets, source
+selection, malformed durations/path traversal, timed Turkish SRT, three aspect
+ratios with real FFmpeg subtitles and mixed audio, narration duration mismatch,
+and full-resolution 1080x1920 rendering from a looped video clip without audio.
+
+Retained legacy Gemini routing tests explicitly replace the policy with mocks
+and use mocked provider clients. They do not prove that those models are free,
+available, or suitable; production policy remains fail-closed.
+
+Live read-only catalog checks: NASA and Wikimedia Commons each returned 12
+results for `moon`. No catalog media was automatically downloaded.
+
+No paid generation was requested, no billing changed, no YouTube credential
+was used, no video was published, and the live Streamlit deployment was not
+changed during verification. Subjective voice quality, historical/scientific
+accuracy, visual motion consistency and production-scale cloud capacity still
+require review; passing tests do not certify professional video quality.

@@ -11,6 +11,7 @@ import wave
 import streamlit as st
 from google import genai
 from google.genai import types
+from free_policy import require_free_generation
 
 
 SAMPLE_TITLE = "Kara Deliğe Düşersen Ne Olur?"
@@ -106,6 +107,7 @@ def safe_gemini_error(exc):
 
 
 def voice_client():
+    require_free_generation()
     return genai.Client(
         api_key=st.secrets["GEMINI_API_KEY"],
         vertexai=False,
@@ -149,6 +151,7 @@ def voice_model_report(default_client, tts_client):
 
 
 def create_narration(client, text, diagnostics=None, *, voice="Orus"):
+    require_free_generation()
     if voice not in TTS_VOICES:
         raise ValueError("Desteklenmeyen ses seçimi.")
     prompt = f"{VOICE_DIRECTION}\n\nSESLENDİRİLECEK METİN:\n{text}"
@@ -455,3 +458,4 @@ def render_task_inbox(bot_roles, run_bot, make_client):
         st.download_button("WAV indir", data, "vortex360-ses-ornegi.wav", "audio/wav")
     render_voice_studio()
     render_manual_queue(bot_roles, run_bot, make_client)
+
