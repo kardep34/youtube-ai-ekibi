@@ -11,7 +11,7 @@ import wave
 import streamlit as st
 from google import genai
 from google.genai import types
-from free_policy import require_free_generation
+from free_policy import FreeOnlyBlocked, require_free_generation
 
 
 SAMPLE_TITLE = "Kara Deliğe Düşersen Ne Olur?"
@@ -46,6 +46,8 @@ def gemini_http_status(exc):
 
 def safe_gemini_error(exc):
     """Show only reviewed provider signals, never the raw response or request."""
+    if isinstance(exc, FreeOnlyBlocked):
+        return str(exc)
     status = gemini_http_status(exc)
     body = getattr(exc, "body", None)
     if not isinstance(body, dict):
@@ -170,6 +172,7 @@ def create_narration(client, text, diagnostics=None, *, voice="Orus"):
     ):
         started = monotonic()
         try:
+            require_free_generation()
             response = client.interactions.create(
                 model=model, input=model_input, response_format={"type": "audio"},
                 generation_config={"speech_config": [{"voice": voice}]},
@@ -184,6 +187,8 @@ def create_narration(client, text, diagnostics=None, *, voice="Orus"):
             )
             VOICE_LOG.info("Gemini TTS %s · %s · WAV %.1f s", model, voice, recording[1])
             return recording
+        except FreeOnlyBlocked:
+            raise
         except Exception as exc:
             detail = safe_gemini_error(exc)
             VOICE_LOG.warning(
@@ -194,6 +199,7 @@ def create_narration(client, text, diagnostics=None, *, voice="Orus"):
                 diagnostics.append((f"{model} · Interactions", detail))
     started = monotonic()
     try:
+        require_free_generation()
         result = client.models.generate_content(
             model=LEGACY_VOICE_MODEL, contents=prompt,
             config=types.GenerateContentConfig(
@@ -412,6 +418,9 @@ def render_task_inbox(bot_roles, run_bot, make_client):
                         with st.spinner(f"{role} çalışıyor…"):
                             results[role] = run_bot(
                                 client, bot_roles[role], f"{title.strip()}\n\n{brief.strip()}"
+                                + ("\n\nÖnceki ekip çıktıları:\n" + "\n\n".join(
+                                    f"{name}: {output}" for name, output in results.items()
+                                ) if results else "")
                             )
                     except Exception:
                         st.error(f"{role} görevi tamamlayamadı.")
