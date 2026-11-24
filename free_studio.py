@@ -70,7 +70,7 @@ def cached_search(provider, query):
 
 def render_free_studio():
     st.header("🎬 Ücretsiz Üretim Stüdyosu")
-    st.info("Ücretli API çağrısı yapılmaz. Gemini üretimi, faturalandırma durumu doğrulanamadığı için kapalıdır. "
+    st.info("Ücretli API çağrısı yapılmaz. Gemini üretimi üstteki ücretsiz bağlantı kontrolünden geçince kullanılabilir. "
             "Konu, süre ve format her projede değişebilir. Hazır metin, görsel, video ve seslerinizi kullanın.")
     state = st.session_state
     state.setdefault("vortex_free_topic", "")
