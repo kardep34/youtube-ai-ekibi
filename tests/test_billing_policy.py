@@ -134,3 +134,15 @@ def test_panel_audio_can_be_used_without_reupload():
     next(c for c in at.checkbox if c.label == 'Panelde üretilen son ses kaydını kullan').check().run()
     assert not at.exception
     assert any('Algenib' in c.value and 'İndirip yeniden yüklemeniz gerekmez' in c.value for c in at.caption)
+
+
+def test_diagnostic_exposes_only_allowlisted_reason_not_provider_payload():
+    from free_policy import checked_response
+    response = Mock(status_code=403)
+    response.json.return_value = {'error': {'message': 'secret-key', 'details': [
+        {'reason': 'SERVICE_DISABLED', 'metadata': {'secret': 'secret-key'}}]}}
+    with pytest.raises(FreeOnlyBlocked) as error:
+        checked_response(response, 'API Keys API')
+    assert 'etkin değil' in str(error.value)
+    assert 'HTTP 403' in str(error.value)
+    assert 'secret-key' not in str(error.value)
